@@ -813,6 +813,112 @@ function placeField(initial, onChange, o = {}){
   return wrap;
 }
 
+/* ====== Velg person fra registeret (med aldersvurdering) ====== */
+const ROLE_LABEL = { father: 'far', mother: 'mor', partner: 'partner', child: 'barn', sibling: 'søsken' };
+function relatedSets(id){
+  const anc = new Set(), desc = new Set();
+  (function up(i){ const p = Store.persons.get(i); if (!p) return; [p.fatherId, p.motherId].forEach(x => { if (x && !anc.has(x)){ anc.add(x); up(x); } }); })(id);
+  (function down(i){ Idx.kidsOf(i).forEach(c => { if (!desc.has(c.id)){ desc.add(c.id); down(c.id); } }); })(id);
+  return { anc, desc };
+}
+/* Vurderer om kandidaten c passer i alder som <role> til ref. Returnerer { lvl: 0 god, 1 ukjent, 2 uvanlig, 3 passer ikke, gap, ideal } */
+function ageFit(role, ref, c){
+  const rb = ref.birthYear, cb = c.birthYear;
+  const r = { lvl: 1, gap: null };
+  // dødsår gir også informasjon
+  if (role === 'father' || role === 'mother'){
+    if (rb != null && c.deathYear != null && c.deathYear < rb - (role === 'father' ? 1 : 0)){ r.lvl = 3; return r; }
+  }
+  if (role === 'child'){
+    if (cb != null && ref.deathYear != null && ref.deathYear < cb - (ref.sex === 'f' ? 0 : 1)){ r.lvl = 3; return r; }
+  }
+  if (rb == null || cb == null) return r;
+  const parentRange = (sex, gap) => {
+    const [g0, g1, m0, m1] = sex === 'f' ? [16, 48, 12, 54] : [16, 62, 12, 78];
+    return gap >= g0 && gap <= g1 ? 0 : gap >= m0 && gap <= m1 ? 2 : 3;
+  };
+  if (role === 'father' || role === 'mother'){ r.gap = rb - cb; r.lvl = parentRange(role === 'father' ? 'm' : 'f', r.gap); r.ideal = 29; }
+  else if (role === 'child'){ r.gap = cb - rb; r.lvl = parentRange(ref.sex === 'f' ? 'f' : 'm', r.gap); r.ideal = 29; }
+  else if (role === 'partner'){ r.gap = Math.abs(cb - rb); r.lvl = r.gap <= 30 ? 0 : r.gap <= 40 ? 2 : 3; r.ideal = 0; }
+  else { r.gap = Math.abs(cb - rb); r.lvl = r.gap <= 30 ? 0 : r.gap <= 40 ? 2 : 3; r.ideal = 0; }
+  return r;
+}
+function relAge(role, ref, c){
+  if (ref.birthYear == null || c.birthYear == null) return '';
+  const d = c.birthYear - ref.birthYear;
+  if (d === 0) return 'jevnaldrende';
+  return Math.abs(d) + ' år ' + (d < 0 ? 'eldre' : 'yngre');
+}
+/* opts: { role, ref:{id,birthYear,deathYear,sex}, exclude:Set, title, onPick(p, extra), onNew(), withYear } */
+function pickPerson(opts){
+  const { role, ref } = opts;
+  const ex = new Set(opts.exclude || []);
+  ex.add(ref.id);
+  const rel = ref.id && Store.persons.has(ref.id) ? relatedSets(ref.id) : { anc: new Set(), desc: new Set() };
+  if (role === 'father' || role === 'mother') rel.desc.forEach(i => ex.add(i));
+  if (role === 'child') rel.anc.forEach(i => ex.add(i));
+  if (role === 'partner'){ rel.anc.forEach(i => ex.add(i)); rel.desc.forEach(i => ex.add(i)); const me = Store.persons.get(ref.id); if (me) Idx.siblingsOf(me).forEach(x => ex.add(x.id)); }
+  if (role === 'sibling'){ rel.anc.forEach(i => ex.add(i)); rel.desc.forEach(i => ex.add(i)); }
+  const cands = [...Store.persons.values()].filter(p => !ex.has(p.id) && !(role === 'father' && p.sex === 'f') && !(role === 'mother' && p.sex === 'm')).map(p => ({ p, fit: ageFit(role, ref, p) }));
+  const groups = [[0, 'Passer i alder'], [1, 'Alder ukjent'], [2, 'Mulig, men uvanlig aldersforskjell'], [3, 'Passer ikke i alder']];
+  cands.sort((a, b) => a.fit.lvl - b.fit.lvl || (a.fit.gap == null ? 0 : Math.abs(a.fit.gap - a.fit.ideal)) - (b.fit.gap == null ? 0 : Math.abs(b.fit.gap - b.fit.ideal)) || nameCmp(a.p, b.p));
+  const search = h('input', { class: 'inp', type: 'search', placeholder: 'Søk i registeret …', autocomplete: 'off', autofocus: true, 'aria-label': 'Søk i registeret', oninput: () => draw() });
+  const yearInp = opts.withYear ? h('input', { class: 'inp', type: 'number', inputmode: 'numeric', placeholder: 'Gift år (valgfritt)', 'aria-label': 'Giftermål, år' }) : null;
+  const list = h('div', { class: 'pk-list' });
+  let showBad = false;
+  const done = (p) => { modal.close(); opts.onPick(p, { year: yearInp ? intOrNull(yearInp.value) : null }); };
+  function draw(){
+    const q = norm(search.value);
+    clear(list);
+    const match = c => !q || norm(fullName(c.p)).includes(q) || norm(c.p.birthName || '').includes(q) || norm((c.p.birthPlace && c.p.birthPlace.name) || '').includes(q) || String(c.p.birthYear || '').includes(q);
+    let any = false;
+    groups.forEach(([lvl, title]) => {
+      const rows = cands.filter(c => c.fit.lvl === lvl && match(c));
+      if (!rows.length) return;
+      if (lvl === 3 && !q && !showBad){
+        list.appendChild(h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { showBad = true; draw(); } }, 'Vis også ' + rows.length + ' som ikke passer i alder'));
+        return;
+      }
+      any = true;
+      list.appendChild(h('h3', { class: 'pk-h' }, title));
+      rows.forEach(c => {
+        const p = c.p;
+        list.appendChild(h('button', { type: 'button', class: 'pk-row', onclick: () => done(p) }, avatar(p, 34),
+          h('span', { class: 'pk-t' }, h('b', null, fullName(p)), p.birthName ? h('span', { class: 'faint' }, ' (født ' + p.birthName + ')') : null,
+            h('span', { class: 'faint pk-s' }, [lifeSpan(p), p.birthPlace && p.birthPlace.name, relAge(role, ref, p)].filter(Boolean).join(' · ')))));
+      });
+    });
+    if (!any && !list.children.length) list.appendChild(h('p', { class: 'muted' }, cands.length ? 'Ingen treff. Prøv et annet søk, eller lag en ny person.' : 'Ingen andre personer i registeret ennå. Lag en ny person.'));
+  }
+  const refTxt = ref.birthYear != null ? 'Valgt person er født ' + ref.birthYear + '. Forslagene er sortert etter hva som er rimelig aldersforskjell.' : 'Fødselsår er ikke lagt inn for personen, så forslagene er sortert etter navn. Legg inn fødselsår for å få forslag etter alder.';
+  const body = h('div', { class: 'modal-b' },
+    h('button', { type: 'button', class: 'btn primary', onclick: () => { modal.close(); opts.onNew(); } }, ico('plus', 18), 'Opprett ny person'),
+    h('p', { class: 'fnote', style: { margin: 0 } }, refTxt),
+    yearInp, search, list);
+  const modal = openModal(opts.title || ('Velg ' + ROLE_LABEL[role]), body, {});
+  draw();
+  return modal;
+}
+/* Felt i skjema: viser valgt person, åpner velgeren ved trykk */
+function personField(opts){
+  let value = opts.value || null;
+  const box = h('div', { class: 'pfield' });
+  const open = () => pickPerson({
+    role: opts.role, ref: opts.ref(), exclude: opts.exclude ? opts.exclude() : [], title: opts.title,
+    onPick: p => { value = p.id; opts.onChange(p.id); draw(); },
+    onNew: () => openPersonForm({ title: 'Ny ' + ROLE_LABEL[opts.role], preset: opts.preset ? opts.preset() : {}, onSaved: np => { value = np.id; opts.onChange(np.id); draw(); } })
+  });
+  function draw(){
+    clear(box);
+    const p = value ? Store.persons.get(value) : null;
+    box.appendChild(h('button', { type: 'button', class: 'inp pf-btn', 'aria-label': opts.label, onclick: open },
+      p ? [avatar(p, 26), h('span', { class: 'pf-n' }, fullName(p), h('span', { class: 'faint' }, ' ' + lifeSpan(p)))] : h('span', { class: 'faint' }, opts.empty || 'Velg eller opprett …')));
+    if (p) box.appendChild(h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Fjern', onclick: () => { value = null; opts.onChange(null); draw(); } }, ico('x', 18)));
+  }
+  draw();
+  return box;
+}
+
 /* ====== Personskjema ====== */
 function openPersonForm(opts = {}){
   const editing = !!opts.person;
@@ -830,17 +936,25 @@ function openPersonForm(opts = {}){
 
   const given = h('input', { class: 'inp', value: f.given || '', autocomplete: 'off', autofocus: true, oninput: e => f.given = e.target.value });
   const family = h('input', { class: 'inp', value: f.family || '', autocomplete: 'off', oninput: e => f.family = e.target.value });
+  const birthName = h('input', { class: 'inp', value: f.birthName || '', autocomplete: 'off', placeholder: 'Hvis annet enn etternavnet, f.eks. pikenavn', oninput: e => f.birthName = e.target.value });
   const sexBtns = {};
   const sexSeg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Kjønn' }, [['m', 'Mann'], ['f', 'Kvinne'], ['u', 'Ukjent']].map(([k, t]) => sexBtns[k] = h('button', { type: 'button', 'aria-pressed': String(f.sex === k), onclick: () => { f.sex = k; Object.entries(sexBtns).forEach(([kk, b]) => b.setAttribute('aria-pressed', String(kk === k))); } }, t)));
   const yearInp = (key, ph) => h('input', { class: 'inp', type: 'number', inputmode: 'numeric', min: 0, max: 2100, placeholder: ph || 'År', value: f[key] != null ? f[key] : '', oninput: e => f[key] = intOrNull(e.target.value) });
   const textInp = (key, ph) => h('input', { class: 'inp', type: 'text', placeholder: ph, value: f[key] || '', oninput: e => f[key] = e.target.value });
 
+  const selfRef = () => ({ id: f.id, birthYear: f.birthYear, deathYear: f.deathYear, sex: f.sex });
+  const parentField = role => personField({ role, label: role === 'father' ? 'Far' : 'Mor', ref: selfRef, value: role === 'father' ? f.fatherId : f.motherId, empty: 'Ukjent. Velg eller opprett …',
+    onChange: v => { if (role === 'father') f.fatherId = v; else f.motherId = v; },
+    exclude: () => f.partners.map(x => x.id).filter(Boolean),
+    preset: () => ({ sex: role === 'father' ? 'm' : 'f' }) });
   const partnersBox = h('div', { style: { display: 'grid', gap: '10px' } });
   function drawPartners(){
     clear(partnersBox);
     f.partners.forEach((pt, i) => {
       partnersBox.appendChild(h('div', { class: 'rowline' },
-        personSelect(pt.id, () => true, v => pt.id = v, 'Velg person'),
+        personField({ role: 'partner', label: 'Partner', ref: selfRef, value: pt.id, onChange: v => pt.id = v,
+          exclude: () => f.partners.filter(x => x !== pt).map(x => x.id).filter(Boolean),
+          preset: () => ({ sex: f.sex === 'm' ? 'f' : f.sex === 'f' ? 'm' : 'u' }) }),
         h('input', { class: 'inp', type: 'number', inputmode: 'numeric', placeholder: 'Gift år', value: pt.year != null ? pt.year : '', 'aria-label': 'Giftermål, år', oninput: e => pt.year = intOrNull(e.target.value) }),
         h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Fjern partner', onclick: () => { f.partners.splice(i, 1); drawPartners(); } }, ico('x', 18))));
     });
@@ -876,7 +990,7 @@ function openPersonForm(opts = {}){
     if (!(f.given || '').trim() && !(f.family || '').trim()){ given.focus(); toast('Skriv inn et navn først.'); return; }
     saveBtn.disabled = true;
     const o = clone(f);
-    o.given = (o.given || '').trim(); o.family = (o.family || '').trim();
+    o.given = (o.given || '').trim(); o.family = (o.family || '').trim(); o.birthName = (o.birthName || '').trim();
     o.birthPlace = o.birthPlace && (o.birthPlace.name || o.birthPlace.lat != null) ? o.birthPlace : null;
     o.deathPlace = o.deathPlace && (o.deathPlace.name || o.deathPlace.lat != null) ? o.deathPlace : null;
     o.moves = (o.moves || []).filter(m => m.place && (m.place.name || m.place.lat != null)).sort((a, b) => (a.year == null) - (b.year == null) || (a.year || 0) - (b.year || 0));
@@ -896,7 +1010,7 @@ function openPersonForm(opts = {}){
     if (opts.onSaved) opts.onSaved(saved);
     toast(editing ? 'Endringene er lagret' : 'Personen er lagt til');
   } },
-    h('div', { class: 'fgrid' }, fld('Fornavn', given, 'half-m'), fld('Etternavn', family, 'half-m'), fld('Kjønn', sexSeg, 'full')),
+    h('div', { class: 'fgrid' }, fld('Fornavn', given, 'half-m'), fld('Etternavn', family, 'half-m'), fld('Fødenavn', birthName, 'full'), fld('Kjønn', sexSeg, 'full')),
     h('div', { class: 'fs' }, h('h3', null, 'Født'),
       h('div', { class: 'fgrid' }, fld('År', yearInp('birthYear', 'f.eks. 1872'), 'half-m'), fld('Dato eller detaljer', textInp('birthDate', 'f.eks. 12. mars'), 'half-m'),
         fld('Fødested', placeField(f.birthPlace, pl => f.birthPlace = pl, { label: 'Fødested' }), 'full'))),
@@ -904,7 +1018,7 @@ function openPersonForm(opts = {}){
       h('div', { class: 'fgrid' }, fld('År (tomt hvis personen lever)', yearInp('deathYear', 'f.eks. 1941'), 'half-m'), fld('Dato eller detaljer', textInp('deathDate', 'f.eks. 3. januar'), 'half-m'),
         fld('Dødssted', placeField(f.deathPlace, pl => f.deathPlace = pl, { label: 'Dødssted' }), 'full'))),
     h('div', { class: 'fs' }, h('h3', null, 'Foreldre'),
-      h('div', { class: 'fgrid' }, fld('Far', personSelect(f.fatherId, p => p.sex !== 'f', v => f.fatherId = v, 'Ukjent'), 'half-m'), fld('Mor', personSelect(f.motherId, p => p.sex !== 'm', v => f.motherId = v, 'Ukjent'), 'half-m'))),
+      h('div', { class: 'fgrid' }, fld('Far', parentField('father'), 'half-m'), fld('Mor', parentField('mother'), 'half-m'))),
     h('div', { class: 'fs' }, h('h3', null, 'Ektefelle eller partner'), partnersBox),
     h('div', { class: 'fs' }, h('h3', null, 'Bosteder gjennom livet'),
       h('p', { class: 'faint', style: { fontSize: '13px' } }, 'Fødestedet brukes som første bosted. Legg til hvert sted personen flyttet til, med årstallet flyttingen skjedde. Stedene med kartposisjon vises i kartanimasjonen.'), movesBox),
@@ -955,7 +1069,7 @@ const RegisterView = {
       return;
     }
     const q = norm(this.q);
-    let rows = all.filter(p => !q || norm(fullName(p)).includes(q) || norm((p.birthPlace && p.birthPlace.name) || '').includes(q) || (p.moves || []).some(m => m.place && norm(m.place.name).includes(q)));
+    let rows = all.filter(p => !q || norm(fullName(p)).includes(q) || norm(p.birthName || '').includes(q) || norm((p.birthPlace && p.birthPlace.name) || '').includes(q) || (p.moves || []).some(m => m.place && norm(m.place.name).includes(q)));
     if (this.sort === 'birth') rows.sort((a, b) => (a.birthYear == null) - (b.birthYear == null) || a.birthYear - b.birthYear || nameCmp(a, b));
     else if (this.sort === 'recent') rows.sort((a, b) => (b.created || 0) - (a.created || 0));
     else rows.sort(nameCmp);
@@ -1014,6 +1128,7 @@ const PersonView = {
     // fakta
     const facts = h('dl', { class: 'facts' });
     const row = (k, v) => { if (v) facts.append(h('dt', null, k), h('dd', null, v)); };
+    row('Født som', p.birthName || '');
     row('Født', [p.birthYear != null ? String(p.birthYear) : null, p.birthDate, p.birthPlace && p.birthPlace.name].filter(Boolean).join(' · '));
     row('Død', [p.deathYear != null ? String(p.deathYear) : null, p.deathDate, p.deathPlace && p.deathPlace.name].filter(Boolean).join(' · '));
     row('Kjønn', p.sex === 'm' ? 'Mann' : p.sex === 'f' ? 'Kvinne' : '');
@@ -1026,17 +1141,46 @@ const PersonView = {
     const partners = Idx.partnersOf(p.id), kids = Idx.kidsOf(p.id), sibs = Idx.siblingsOf(p);
     const grp = (title, nodes, adds) => h('div', null, h('h3', null, title), h('div', { class: 'chips' }, nodes, edit ? adds : null));
     const addBtn = (label, fn) => h('button', { class: 'btn sm ghost', onclick: fn }, ico('plus', 14), label);
-    const addParent = kind => openPersonForm({ title: kind === 'm' ? 'Ny far' : 'Ny mor', preset: { sex: kind, family: kind === 'm' ? '' : '' }, onSaved: np => { const q = clone(Store.persons.get(p.id)); if (kind === 'm') q.fatherId = np.id; else q.motherId = np.id; Store.savePerson(q); } });
+    const relink = async fn => { const q = clone(Store.persons.get(p.id)); fn(q); await Store.savePerson(q); };
+    const setParent = async (child, field, pid) => { const q = clone(Store.persons.get(child)); q[field] = pid; await Store.savePerson(q); };
+    const refOf = { id: p.id, birthYear: p.birthYear, deathYear: p.deathYear, sex: p.sex };
+    const addParent = kind => pickPerson({ role: kind === 'm' ? 'father' : 'mother', ref: refOf, exclude: [p.fatherId, p.motherId, ...partners.map(x => x.p.id)].filter(Boolean),
+      onPick: np => relink(q => { if (kind === 'm') q.fatherId = np.id; else q.motherId = np.id; }).then(() => toast(fullName(np) + ' er lagt til som ' + (kind === 'm' ? 'far' : 'mor'))),
+      onNew: () => openPersonForm({ title: kind === 'm' ? 'Ny far' : 'Ny mor', preset: { sex: kind }, onSaved: np => relink(q => { if (kind === 'm') q.fatherId = np.id; else q.motherId = np.id; }) }) });
+    const addPartner = () => pickPerson({ role: 'partner', withYear: true, ref: refOf, exclude: partners.map(x => x.p.id),
+      onPick: (np, ex) => relink(q => { q.partners = (q.partners || []).concat([{ id: np.id, year: ex.year }]); }).then(() => toast(fullName(np) + ' er lagt til som partner')),
+      onNew: () => openPersonForm({ title: 'Ny partner', preset: { partners: [{ id: p.id, year: null }], sex: partners.length || p.sex === 'u' ? 'u' : (p.sex === 'm' ? 'f' : 'm') } }) });
+    const addChild = () => {
+      const other = partners.length === 1 ? partners[0].p.id : null;
+      const field = p.sex === 'f' ? 'motherId' : 'fatherId';
+      pickPerson({ role: 'child', ref: refOf, exclude: kids.map(x => x.id),
+        onPick: async np => {
+          if (np[field] && np[field] !== p.id){ toast(fullName(np) + ' har allerede en annen ' + (field === 'motherId' ? 'mor' : 'far') + ' registrert.'); return; }
+          await setParent(np.id, field, p.id); toast(fullName(np) + ' er lagt til som barn');
+        },
+        onNew: () => {
+          const preset = { family: (p.sex === 'f' ? '' : p.family) || '' };
+          if (p.sex === 'f'){ preset.motherId = p.id; preset.fatherId = other; } else { preset.fatherId = p.id; preset.motherId = other; }
+          openPersonForm({ title: 'Nytt barn', preset });
+        } });
+    };
+    const addSibling = () => {
+      if (!p.fatherId && !p.motherId){ toast('Legg først inn minst én forelder, så kan søsken kobles til dem.'); return; }
+      pickPerson({ role: 'sibling', ref: refOf, exclude: sibs.map(x => x.id),
+        onPick: async np => {
+          const q = clone(Store.persons.get(np.id));
+          if ((p.fatherId && q.fatherId && q.fatherId !== p.fatherId) || (p.motherId && q.motherId && q.motherId !== p.motherId)){ toast(fullName(np) + ' har andre foreldre registrert. Rediger personen hvis de skal være søsken.'); return; }
+          if (p.fatherId && !q.fatherId) q.fatherId = p.fatherId;
+          if (p.motherId && !q.motherId) q.motherId = p.motherId;
+          await Store.savePerson(q); toast(fullName(np) + ' er lagt til som søsken');
+        },
+        onNew: () => openPersonForm({ title: 'Nytt søsken', preset: { fatherId: p.fatherId || null, motherId: p.motherId || null, family: p.family || '' } }) });
+    };
     const fam = h('section', { class: 'card' }, h('h2', null, 'Familie'), h('div', { class: 'fam' },
       grp('Foreldre', parents.map(x => personChip(x, x.id === p.fatherId ? 'far' : 'mor')), [!p.fatherId ? addBtn('Far', () => addParent('m')) : null, !p.motherId ? addBtn('Mor', () => addParent('f')) : null]),
-      grp('Partner', partners.map(x => personChip(x.p, x.year != null ? 'gift ' + x.year : '')), addBtn('Partner', () => openPersonForm({ title: 'Ny partner', preset: { partners: [{ id: p.id, year: null }], sex: partners.length || p.sex === 'u' ? 'u' : (p.sex === 'm' ? 'f' : 'm') } }))),
-      grp('Barn', kids.map(x => personChip(x, x.birthYear != null ? 'f. ' + x.birthYear : '')), addBtn('Barn', () => {
-        const other = partners.length === 1 ? partners[0].p.id : null;
-        const preset = {};
-        if (p.sex === 'f'){ preset.motherId = p.id; preset.fatherId = other; } else { preset.fatherId = p.id; preset.motherId = other; }
-        openPersonForm({ title: 'Nytt barn', preset });
-      })),
-      sibs.length ? grp('Søsken', sibs.map(x => personChip(x, x.birthYear != null ? 'f. ' + x.birthYear : '')), null) : null));
+      grp('Partner', partners.map(x => personChip(x.p, x.year != null ? 'gift ' + x.year : '')), addBtn('Partner', addPartner)),
+      grp('Barn', kids.map(x => personChip(x, x.birthYear != null ? 'f. ' + x.birthYear : '')), addBtn('Barn', addChild)),
+      grp('Søsken', sibs.map(x => personChip(x, x.birthYear != null ? 'f. ' + x.birthYear : '')), addBtn('Søsken', addSibling))));
 
     // livsløp
     const evs = lifeEvents(p);
