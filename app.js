@@ -342,9 +342,24 @@ function locAt(tl, y){
 const FAM_COLORS = ['var(--f1)', 'var(--f2)', 'var(--f3)', 'var(--f4)', 'var(--f5)', 'var(--f6)'];
 
 /* ====== Avatar ====== */
+/* Utsnitt: senter (cx,cy) som andel av bildet, z = forstørrelse (1 = hele korteste side). Returnerer prosent for img i en kvadratisk boks. */
+function cropGeom(photo, c){
+  const w = photo.w, hh = photo.h, side = Math.min(w, hh) / Math.max(1, c.z || 1);
+  const hx = side / 2 / w, hy = side / 2 / hh;
+  const cx = Math.min(1 - hx, Math.max(hx, c.cx == null ? 0.5 : c.cx)), cy = Math.min(1 - hy, Math.max(hy, c.cy == null ? 0.5 : c.cy));
+  return { w: w / side * 100, l: (0.5 - cx * w / side) * 100, t: (0.5 - cy * hh / side) * 100, cx, cy, side };
+}
 function avatar(p, size = 40){
   const box = h('span', { class: 'av ' + (p.sex === 'm' ? 'm' : p.sex === 'f' ? 'f' : ''), style: { '--s': size + 'px' } });
   const list = Idx.photosOf.get(p.id);
+  const pr = p.portrait && Store.photos.get(p.portrait.photoId);
+  if (pr && pr.assetId && pr.w && pr.h && !isSource(pr)){
+    const g = cropGeom(pr, p.portrait);
+    const img = h('img', { src: photoUrl(pr), alt: '', loading: 'lazy', style: { width: g.w + '%', left: g.l + '%', top: g.t + '%' } });
+    img.addEventListener('error', () => { img.remove(); box.textContent = initials(p); });
+    box.appendChild(img);
+    return box;
+  }
   const hit = list && list.find(x => !isSource(x.photo) && x.tag.x != null && x.photo.w && x.photo.h && x.photo.assetId);
   if (hit){
     const { photo, tag } = hit, r = photo.h / photo.w;
@@ -1028,6 +1043,74 @@ function openPersonForm(opts = {}){
   return modal;
 }
 
+/* ====== Profilbilde: velg bilde og juster utsnittet ====== */
+function openPortraitEditor(p){
+  const phs = (Idx.photosOf.get(p.id) || []).map(x => x.photo).filter(ph => !isSource(ph) && ph.assetId && ph.w && ph.h);
+  const uniq = [...new Map(phs.map(ph => [ph.id, ph])).values()];
+  if (!uniq.length){ toast('Legg først inn et bilde og tagg ' + (p.given || 'personen') + ' i det.'); return; }
+  const cur = p.portrait && uniq.find(ph => ph.id === p.portrait.photoId);
+  let ph = cur || uniq[0];
+  const tagOf = x => { const t = (Idx.photosOf.get(p.id) || []).find(y => y.photo.id === x.id); return t && t.tag.x != null ? t.tag : null; };
+  const st = { cx: 0.5, cy: 0.5, z: 1 };
+  const init = () => {
+    if (cur && ph.id === p.portrait.photoId){ st.cx = p.portrait.cx; st.cy = p.portrait.cy; st.z = p.portrait.z || 1; }
+    else { const t = tagOf(ph); st.cx = t ? t.x : 0.5; st.cy = t ? t.y : 0.5; st.z = t ? 2.5 : 1; }
+  };
+  init();
+  const stage = h('div', { class: 'crop-stage' });
+  const img = h('img', { alt: '' });
+  stage.append(img, h('div', { class: 'crop-grid' }));
+  const zoom = h('input', { type: 'range', min: 1, max: 8, step: 0.01, 'aria-label': 'Forstørrelse' });
+  const prev = h('div', { class: 'av-slot' });
+  const thumbs = h('div', { class: 'crop-thumbs' });
+  const apply = () => {
+    const g = cropGeom(ph, st); st.cx = g.cx; st.cy = g.cy;
+    img.src = photoUrl(ph);
+    Object.assign(img.style, { width: g.w + '%', left: g.l + '%', top: g.t + '%' });
+    zoom.value = st.z;
+    clear(prev).appendChild(avatarPreview(ph, st, 56));
+  };
+  const avatarPreview = (photo, c, size) => {
+    const box = h('span', { class: 'av', style: { '--s': size + 'px' } });
+    const g = cropGeom(photo, c);
+    box.appendChild(h('img', { src: photoUrl(photo), alt: '', style: { width: g.w + '%', left: g.l + '%', top: g.t + '%' } }));
+    return box;
+  };
+  zoom.addEventListener('input', () => { st.z = +zoom.value; apply(); });
+  stage.addEventListener('wheel', e => { e.preventDefault(); st.z = Math.min(8, Math.max(1, st.z * (e.deltaY < 0 ? 1.08 : 1 / 1.08))); apply(); }, { passive: false });
+  let drag = null;
+  stage.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, cx: st.cx, cy: st.cy }; try { stage.setPointerCapture(e.pointerId); } catch (_) {} });
+  stage.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const r = stage.getBoundingClientRect(), g = cropGeom(ph, st);
+    // ett bildepunkt per boksbredde: boksen viser 'side' kildepiksler
+    st.cx = drag.cx - (e.clientX - drag.x) / r.width * g.side / ph.w;
+    st.cy = drag.cy - (e.clientY - drag.y) / r.height * g.side / ph.h;
+    apply();
+  });
+  const end = () => { drag = null; };
+  stage.addEventListener('pointerup', end); stage.addEventListener('pointercancel', end);
+  const drawThumbs = () => {
+    clear(thumbs);
+    uniq.forEach(x => thumbs.appendChild(h('button', { type: 'button', 'aria-pressed': String(x.id === ph.id), 'aria-label': x.caption || 'Bilde', onclick: () => { ph = x; init(); drawThumbs(); apply(); } }, h('img', { src: photoUrl(x), alt: '', loading: 'lazy' }))));
+  };
+  const save = async () => {
+    const q = clone(Store.persons.get(p.id));
+    q.portrait = { photoId: ph.id, cx: +st.cx.toFixed(4), cy: +st.cy.toFixed(4), z: +st.z.toFixed(3) };
+    await Store.savePerson(q); modal.close(); toast('Profilbildet er lagret');
+  };
+  const reset = async () => { const q = clone(Store.persons.get(p.id)); delete q.portrait; await Store.savePerson(q); modal.close(); toast('Profilbildet velges automatisk igjen'); };
+  const body = h('div', { class: 'modal-b' }, h('div', { class: 'crop' },
+    uniq.length > 1 ? thumbs : null,
+    stage,
+    h('div', { class: 'crop-row' }, h('span', { class: 'faint', style: { fontSize: '13px' } }, 'Zoom'), zoom, prev),
+    h('p', { class: 'fnote', style: { margin: 0, textAlign: 'center' } }, 'Dra i bildet for å flytte utsnittet. Bruk glidebryteren for å zoome.')),
+    h('div', { class: 'form-actions' }, p.portrait ? h('button', { type: 'button', class: 'btn ghost', onclick: reset }, 'Velg automatisk') : h('span'),
+      h('div', { style: { display: 'flex', gap: '8px' } }, h('button', { type: 'button', class: 'btn ghost', onclick: () => modal.close() }, 'Avbryt'), h('button', { type: 'button', class: 'btn primary', onclick: save }, 'Lagre'))));
+  const modal = openModal('Profilbilde for ' + fullName(p), body, {});
+  drawThumbs(); apply();
+}
+
 /* ====== Register ====== */
 const RegisterView = {
   q: '', sort: 'name',
@@ -1122,6 +1205,7 @@ const PersonView = {
         h('div', { class: 'life' }, lifeSpan(p) + (ageText(p) ? ' · ' + ageText(p) : '')),
         h('div', { class: 'acts' },
           edit ? h('button', { class: 'btn', onclick: () => openPersonForm({ person: p }) }, ico('pencil', 16), 'Rediger') : null,
+          edit ? h('button', { class: 'btn', onclick: () => openPortraitEditor(p) }, ico('image', 16), 'Profilbilde') : null,
           h('button', { class: 'btn', onclick: () => App.go('tree', p.id) }, ico('tree', 16), 'Vis i slektstreet'),
           h('button', { class: 'btn', onclick: () => App.go('map', p.id) }, ico('pin', 16), 'Vis på kartet'))));
 
