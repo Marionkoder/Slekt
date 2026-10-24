@@ -44,6 +44,10 @@ const ICONS = {
   search:'<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
   pencil:'<path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19z"/>',
   back:'<path d="M15 5l-7 7 7 7"/>', next:'<path d="M9 5l7 7-7 7"/>',
+  book:'<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7h6"/>',
+  rotr:'<path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"/>',
+  rotl:'<path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v5h5"/>',
+  crop:'<path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14"/>',
   fit:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   tag:'<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.3"/>',
   trash:'<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
@@ -355,7 +359,7 @@ function avatar(p, size = 40){
   const pr = p.portrait && Store.photos.get(p.portrait.photoId);
   if (pr && pr.assetId && pr.w && pr.h && !isSource(pr)){
     const g = cropGeom(pr, p.portrait);
-    const img = h('img', { src: photoUrl(pr), alt: '', loading: 'lazy', style: { width: g.w + '%', left: g.l + '%', top: g.t + '%' } });
+    const img = h('img', { src: photoUrl(pr), alt: '', loading: 'lazy', 'data-asset': pr.assetId, 'data-max': 1200, style: { width: g.w + '%', left: g.l + '%', top: g.t + '%' } });
     img.addEventListener('error', () => { img.remove(); box.textContent = initials(p); });
     box.appendChild(img);
     return box;
@@ -368,7 +372,7 @@ function avatar(p, size = 40){
     let left = (0.5 - tag.x * Z) * 100, top = (0.5 - tag.y * Z * r) * 100;
     left = Math.min(0, Math.max((1 - Z) * 100, left));
     top = Math.min(0, Math.max((1 - Z * r) * 100, top));
-    const img = h('img', { src: photoUrl(photo), alt: '', loading: 'lazy', style: { width: (Z * 100) + '%', left: left + '%', top: top + '%' } });
+    const img = h('img', { src: photoUrl(photo), alt: '', loading: 'lazy', 'data-asset': photo.assetId, 'data-max': 1200, style: { width: (Z * 100) + '%', left: left + '%', top: top + '%' } });
     img.addEventListener('error', () => { img.remove(); box.textContent = initials(p); });
     box.appendChild(img);
   } else box.textContent = initials(p);
@@ -1206,6 +1210,8 @@ const PersonView = {
         h('div', { class: 'acts' },
           edit ? h('button', { class: 'btn', onclick: () => openPersonForm({ person: p }) }, ico('pencil', 16), 'Rediger') : null,
           edit ? h('button', { class: 'btn', onclick: () => openPortraitEditor(p) }, ico('image', 16), 'Profilbilde') : null,
+          h('button', { class: 'btn', onclick: () => App.go('ancestors', p.id) }, ico('users', 16), 'Aner'),
+          h('button', { class: 'btn', onclick: () => App.go('descendants', p.id) }, ico('users', 16), 'Etterkommere'),
           h('button', { class: 'btn', onclick: () => App.go('tree', p.id) }, ico('tree', 16), 'Vis i slektstreet'),
           h('button', { class: 'btn', onclick: () => App.go('map', p.id) }, ico('pin', 16), 'Vis på kartet'))));
 
@@ -1297,11 +1303,11 @@ const PersonView = {
     }
 
     // bilder
-    const photos = (Idx.photosOf.get(p.id) || []).filter(x => !isSource(x.photo));
+    const photos = (Idx.photosOf.get(p.id) || []).filter(x => !isSource(x.photo)).sort((a, b) => (b.photo.year == null ? -1 : 0) - (a.photo.year == null ? -1 : 0) || (b.photo.year || 0) - (a.photo.year || 0) || (b.photo.created || 0) - (a.photo.created || 0));
     const sources = (Idx.photosOf.get(p.id) || []).filter(x => isSource(x.photo));
     const fileIn = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true, onchange: e => { Photos.uploadFiles([...e.target.files], { tagPerson: p.id }); e.target.value = ''; } });
     const photoCard = h('section', { class: 'card' }, h('h2', null, 'Bilder', (edit && Store.assets) ? h('button', { class: 'btn sm', onclick: () => fileIn.click() }, ico('upload', 15), 'Legg til bilde') : null), fileIn,
-      photos.length ? h('div', { class: 'thumbs' }, photos.map(x => h('button', { class: 'thumb', 'aria-label': x.photo.caption || 'Bilde', onclick: () => Photos.open(x.photo.id) }, h('img', { src: photoUrl(x.photo), alt: x.photo.caption || '', loading: 'lazy' }), x.photo.year || x.photo.caption ? h('span', { class: 'cap' }, [x.photo.year, x.photo.caption].filter(Boolean).join(' · ')) : null)))
+      photos.length ? h('div', { class: 'thumbs' }, photos.map(x => h('button', { class: 'thumb', 'aria-label': x.photo.caption || 'Bilde', onclick: () => Photos.open(x.photo.id, { list: photos.map(y => y.photo.id) }) }, h('img', { src: photoUrl(x.photo), alt: x.photo.caption || '', loading: 'lazy' }), x.photo.year || x.photo.caption ? h('span', { class: 'cap' }, [x.photo.year, x.photo.caption].filter(Boolean).join(' · ')) : null)))
         : h('p', { class: 'muted' }, Store.assets ? 'Ingen bilder av ' + (p.given || 'personen') + ' ennå. Last opp et bilde og trykk på ansiktet for å tagge.' : 'Bilder kan ikke lastes opp i denne visningen.'));
 
     const srcIn = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true, onchange: e => { Photos.uploadFiles([...e.target.files], { tagPerson: p.id, kind: 'source' }); e.target.value = ''; } });
@@ -1755,6 +1761,200 @@ const MapView = {
 };
 
 /* ====== Bilder ====== */
+/* ====== Roter bilde (90 grader) ====== */
+async function rotatePhoto(id, dir){
+  const ph = Store.photos.get(id);
+  if (!ph || !ph.assetId) return;
+  const src = await assetBlob(ph.assetId);
+  const bmp = await createImageBitmap(src);
+  try {
+    const cv = document.createElement('canvas'); cv.width = bmp.height; cv.height = bmp.width;
+    const c = cv.getContext('2d'); c.translate(cv.width / 2, cv.height / 2); c.rotate(dir * Math.PI / 2); c.drawImage(bmp, -bmp.width / 2, -bmp.height / 2);
+    let out = null;
+    if (src.type === 'image/png') out = await new Promise(res => cv.toBlob(res, 'image/png'));
+    if (!out || out.size > 19 * 1024 * 1024) out = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.95));
+    if (!out) throw new Error('encode');
+    const up = await Store.assets.upload(out);
+    const map = (x, y) => dir > 0 ? [1 - y, x] : [y, 1 - x];
+    const q = clone(Store.photos.get(id) || ph);
+    const old = q.assetId;
+    q.assetId = up.id; q.w = cv.width; q.h = cv.height;
+    q.tags = (q.tags || []).map(t => { if (t.x == null) return t; const [nx, ny] = map(t.x, t.y); return { pid: t.pid, x: +nx.toFixed(4), y: +ny.toFixed(4) }; });
+    await Store.savePhoto(q);
+    for (const per of [...Store.persons.values()]){
+      if (!per.portrait || per.portrait.photoId !== id) continue;
+      const o = clone(per), [nx, ny] = map(per.portrait.cx, per.portrait.cy);
+      o.portrait = { photoId: id, cx: +nx.toFixed(4), cy: +ny.toFixed(4), z: per.portrait.z };
+      await Store.savePerson(o);
+    }
+    if (old && old !== up.id && Store.assets){ try { await Store.assets.delete(old); } catch (_) {} }
+  } finally { if (bmp.close) bmp.close(); }
+}
+
+/* ====== Beskjær bilde ====== */
+const CROP_RATIOS = [['Fri', null], ['Original', 'orig'], ['1:1', 1], ['4:3', 4 / 3], ['3:4', 3 / 4], ['3:2', 3 / 2], ['2:3', 2 / 3]];
+function openCropEditor(photoId, onDone){
+  const ph0 = Store.photos.get(photoId);
+  if (!ph0 || !ph0.assetId) return;
+  const W = ph0.w, H = ph0.h;
+  let r = { x0: 0, y0: 0, x1: 1, y1: 1 };
+  let lock = null;                       // pikselforhold bredde/høyde, eller null
+  const kNorm = () => lock * H / W;      // forhold i normaliserte koordinater
+  const wrap = h('div', { class: 'cr-wrap', style: { width: 'min(100%, 640px, calc(58vh * ' + (W / H).toFixed(4) + '))', aspectRatio: W + ' / ' + H } });
+  const img = h('img', { src: photoUrl(ph0), alt: '', draggable: false });
+  const box = h('div', { class: 'cr-box', tabindex: 0, 'aria-label': 'Utsnitt' });
+  const HANDLES = [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]];
+  HANDLES.forEach(([hx, hy]) => box.appendChild(h('i', { class: 'cr-h', 'data-hx': hx, 'data-hy': hy })));
+  box.appendChild(h('div', { class: 'cr-grid' }));
+  const shade = h('div', { class: 'cr-shade' });
+  wrap.append(h('div', { class: 'cr-clip' }, img, shade), box);
+  const info = h('p', { class: 'fnote', style: { margin: 0, textAlign: 'center' } });
+  const ratioBar = h('div', { class: 'seg', role: 'group', 'aria-label': 'Format', style: { flexWrap: 'wrap' } });
+  function px(){ return { w: Math.round((r.x1 - r.x0) * W), h: Math.round((r.y1 - r.y0) * H) }; }
+  function draw(){
+    Object.assign(shade.style, { left: r.x0 * 100 + '%', top: r.y0 * 100 + '%', width: (r.x1 - r.x0) * 100 + '%', height: (r.y1 - r.y0) * 100 + '%' });
+    Object.assign(box.style, { left: r.x0 * 100 + '%', top: r.y0 * 100 + '%', width: (r.x1 - r.x0) * 100 + '%', height: (r.y1 - r.y0) * 100 + '%' });
+    const s = px();
+    info.textContent = 'Utsnitt: ' + s.w + ' × ' + s.h + ' piksler (originalen er ' + W + ' × ' + H + ')';
+    const full = r.x0 === 0 && r.y0 === 0 && r.x1 === 1 && r.y1 === 1;
+    saveCopy.disabled = replaceBtn.disabled = full;
+  }
+  function refit(){
+    if (!lock) return;
+    const k = kNorm(), cx = (r.x0 + r.x1) / 2, cy = (r.y0 + r.y1) / 2;
+    let w = r.x1 - r.x0, hh = r.y1 - r.y0;
+    if (w / hh > k) w = hh * k; else hh = w / k;
+    r = { x0: cx - w / 2, x1: cx + w / 2, y0: cy - hh / 2, y1: cy + hh / 2 };
+  }
+  const drawRatios = () => { clear(ratioBar); CROP_RATIOS.forEach(([t, v]) => ratioBar.appendChild(h('button', { type: 'button', 'aria-pressed': String((v === 'orig' ? Math.abs((lock || 0) - W / H) < 1e-6 : v) === (v === 'orig' ? true : lock)), onclick: () => { lock = v === 'orig' ? W / H : v; refit(); drawRatios(); draw(); } }, t))); };
+  const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+  let drag = null;
+  wrap.addEventListener('pointerdown', e => {
+    const t = e.target; let mode = null;
+    if (t.classList.contains('cr-h')) mode = { hx: +t.dataset.hx, hy: +t.dataset.hy };
+    else if (box.contains(t)) mode = 'move';
+    else return;
+    e.preventDefault();
+    try { wrap.setPointerCapture(e.pointerId); } catch (_) {}
+    const b = wrap.getBoundingClientRect();
+    drag = { mode, sx: e.clientX, sy: e.clientY, r0: { ...r }, b };
+  });
+  wrap.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const { b, r0, mode } = drag;
+    const dx = (e.clientX - drag.sx) / b.width, dy = (e.clientY - drag.sy) / b.height;
+    if (mode === 'move'){
+      const w = r0.x1 - r0.x0, hh = r0.y1 - r0.y0;
+      const x0 = clamp(r0.x0 + dx, 0, 1 - w), y0 = clamp(r0.y0 + dy, 0, 1 - hh);
+      r = { x0, y0, x1: x0 + w, y1: y0 + hh };
+    } else {
+      const { hx, hy } = mode, MIN = 0.03;
+      const cx = (r0.x0 + r0.x1) / 2, cy = (r0.y0 + r0.y1) / 2;
+      const ax = hx === 1 ? r0.x0 : hx === -1 ? r0.x1 : cx, ay = hy === 1 ? r0.y0 : hy === -1 ? r0.y1 : cy;
+      const px_ = clamp((hx === 1 ? r0.x1 : hx === -1 ? r0.x0 : cx) + dx), py_ = clamp((hy === 1 ? r0.y1 : hy === -1 ? r0.y0 : cy) + dy);
+      let w = hx ? Math.abs(px_ - ax) : r0.x1 - r0.x0, hh = hy ? Math.abs(py_ - ay) : r0.y1 - r0.y0;
+      // ikke dra over motsatt kant
+      if (hx && ((hx === 1 && px_ < ax) || (hx === -1 && px_ > ax))) w = 0;
+      if (hy && ((hy === 1 && py_ < ay) || (hy === -1 && py_ > ay))) hh = 0;
+      if (lock){
+        const k = kNorm();
+        if (hx && hy){ if (w / k > hh) hh = w / k; else w = hh * k; }
+        else if (hx) hh = w / k;
+        else w = hh * k;
+        const maxW = hx === 1 ? 1 - ax : hx === -1 ? ax : 2 * Math.min(cx, 1 - cx);
+        const maxH = hy === 1 ? 1 - ay : hy === -1 ? ay : 2 * Math.min(cy, 1 - cy);
+        if (w > maxW){ w = maxW; hh = w / k; }
+        if (hh > maxH){ hh = maxH; w = hh * k; }
+        if (w < MIN){ w = MIN; hh = w / k; }
+      } else { w = Math.max(MIN, w); hh = Math.max(MIN, hh); }
+      const nx0 = hx === 1 ? ax : hx === -1 ? ax - w : cx - w / 2, ny0 = hy === 1 ? ay : hy === -1 ? ay - hh : cy - hh / 2;
+      const x0 = clamp(nx0, 0, 1 - w), y0 = clamp(ny0, 0, 1 - hh);
+      r = { x0, y0, x1: x0 + w, y1: y0 + hh };
+    }
+    draw();
+  });
+  const end = () => { drag = null; };
+  wrap.addEventListener('pointerup', end); wrap.addEventListener('pointercancel', end);
+
+  async function cropBlob(){
+    const src = await assetBlob(ph0.assetId);
+    const bmp = await createImageBitmap(src);
+    try {
+      const sx = Math.round(r.x0 * bmp.width), sy = Math.round(r.y0 * bmp.height);
+      const cw = Math.max(1, Math.min(bmp.width - sx, Math.round((r.x1 - r.x0) * bmp.width))), ch = Math.max(1, Math.min(bmp.height - sy, Math.round((r.y1 - r.y0) * bmp.height)));
+      const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+      cv.getContext('2d').drawImage(bmp, sx, sy, cw, ch, 0, 0, cw, ch);
+      const LIMIT = 19 * 1024 * 1024;
+      let out = null;
+      if (src.type === 'image/png') out = await new Promise(res => cv.toBlob(res, 'image/png'));
+      if (!out || out.size > LIMIT) out = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.95));
+      if (!out) throw new Error('encode');
+      return { blob: out, sx, sy, cw, ch, bw: bmp.width, bh: bmp.height };
+    } finally { if (bmp.close) bmp.close(); }
+  }
+  const mapTags = (tags, c, isSrc) => {
+    let dropped = 0;
+    const out = [];
+    (tags || []).forEach(t => {
+      if (t.x == null){ out.push(t); return; }
+      const nx = (t.x * c.bw - c.sx) / c.cw, ny = (t.y * c.bh - c.sy) / c.ch;
+      if (nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1) out.push({ pid: t.pid, x: +nx.toFixed(4), y: +ny.toFixed(4) });
+      else if (isSrc) out.push({ pid: t.pid, x: null, y: null });
+      else dropped++;
+    });
+    return { tags: out, dropped };
+  };
+  async function commit(replace){
+    saveCopy.disabled = replaceBtn.disabled = true;
+    try {
+      const c = await cropBlob();
+      const up = await Store.assets.upload(c.blob);
+      const isSrc = isSource(ph0);
+      const mt = mapTags(ph0.tags, c, isSrc);
+      let resultId = null;
+      if (replace){
+        const cur = Store.photos.get(ph0.id) || ph0;
+        const q = Object.assign(clone(cur), { assetId: up.id, w: c.cw, h: c.ch, tags: mt.tags });
+        const oldAsset = cur.assetId;
+        await Store.savePhoto(q);
+        // profilbilder som bruker dette bildet følger med utsnittet
+        for (const per of [...Store.persons.values()]){
+          if (!per.portrait || per.portrait.photoId !== ph0.id) continue;
+          const pp = per.portrait, side = Math.min(c.bw, c.bh) / Math.max(1, pp.z || 1);
+          const nx = (pp.cx * c.bw - c.sx) / c.cw, ny = (pp.cy * c.bh - c.sy) / c.ch;
+          const o = clone(per);
+          if (nx < 0 || nx > 1 || ny < 0 || ny > 1) delete o.portrait;
+          else o.portrait = { photoId: ph0.id, cx: +nx.toFixed(4), cy: +ny.toFixed(4), z: +Math.max(1, Math.min(c.cw, c.ch) / side).toFixed(3) };
+          await Store.savePerson(o);
+        }
+        if (oldAsset && oldAsset !== up.id && Store.assets){ try { await Store.assets.delete(oldAsset); } catch (_) {} }
+        resultId = ph0.id;
+      } else {
+        const q = Object.assign(clone(ph0), { id: uid(), assetId: up.id, w: c.cw, h: c.ch, tags: mt.tags, created: Date.now() });
+        q.caption = (ph0.caption || '') + (ph0.caption ? ' ' : '') + '(beskåret)';
+        const saved = await Store.savePhoto(q);
+        resultId = (saved && saved.id) || q.id;
+      }
+      modal.close();
+      toast((replace ? 'Bildet er beskåret' : 'Beskåret kopi er lagret') + (mt.dropped ? ' · ' + plural(mt.dropped, 'tagg', 'tagger') + ' utenfor utsnittet er fjernet' : ''));
+      if (onDone) onDone(resultId, replace);
+    } catch (e){ console.error(e); toast('Kunne ikke beskjære bildet.'); draw(); }
+  }
+  const saveCopy = h('button', { type: 'button', class: 'btn primary', onclick: () => commit(false) }, 'Lagre som kopi');
+  let armed = false;
+  const replaceBtn = h('button', { type: 'button', class: 'btn', onclick: () => {
+    if (!armed){ armed = true; replaceBtn.classList.add('sure'); replaceBtn.textContent = 'Trykk igjen for å erstatte originalen'; setTimeout(() => { armed = false; replaceBtn.classList.remove('sure'); replaceBtn.textContent = 'Erstatt originalen'; }, 4000); return; }
+    commit(true);
+  } }, 'Erstatt originalen');
+  const body = h('div', { class: 'modal-b' }, h('div', { class: 'crop' }, ratioBar, wrap, info,
+    h('p', { class: 'fnote', style: { margin: 0, textAlign: 'center' } }, 'Dra i hjørnene eller kantene for å velge utsnitt, og dra inni rammen for å flytte den. Beskjæringen gjøres på originalbildet i full oppløsning.')),
+    h('div', { class: 'form-actions', style: { flexWrap: 'wrap', gap: '8px' } },
+      h('button', { type: 'button', class: 'btn ghost', onclick: () => { r = { x0: 0, y0: 0, x1: 1, y1: 1 }; lock = null; drawRatios(); draw(); } }, 'Tilbakestill'),
+      h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, h('button', { type: 'button', class: 'btn ghost', onclick: () => modal.close() }, 'Avbryt'), replaceBtn, saveCopy)));
+  const modal = openModal(isSource(ph0) ? 'Beskjær kilde' : 'Beskjær bilde', body, { cls: 'wide' });
+  drawRatios(); draw();
+}
+
 const Photos = {
   filter: '', tab: 'photo',
   mount(root){
@@ -1866,9 +2066,11 @@ const Photos = {
       const p = photo(); if (!p) return;
       const edit = Store.canWrite;
       const tagBtn = edit ? h('button', { class: 'btn' + (tagging ? ' primary' : ''), onclick: () => { tagging = !tagging; pending = null; pre = null; query = ''; drawStage(); drawSide(); } }, ico('tag', 16), tagging ? 'Avbryt tagging' : 'Tagg personer') : null;
+      const cropBtn = edit && p.assetId && p.w && p.h ? h('button', { class: 'btn', onclick: () => openCropEditor(p.id, (nid, replaced) => { if (!replaced && nid){ list.splice(list.indexOf(cur) + 1, 0, nid); cur = nid; } tagging = false; render(); }) }, ico('crop', 16), 'Beskjær') : null;
+      const rotBtn = dir => edit && p.assetId && p.w && p.h ? h('button', { class: 'btn ghost', 'aria-label': dir > 0 ? 'Roter mot høyre' : 'Roter mot venstre', onclick: async e => { const b = e.currentTarget; b.disabled = true; try { await rotatePhoto(p.id, dir); } catch (err){ console.error(err); toast('Kunne ikke rotere bildet.'); } b.disabled = false; } }, ico(dir > 0 ? 'rotr' : 'rotl', 16), dir > 0 ? 'Roter høyre' : 'Roter venstre') : null;
       const sizeBtn = h('button', { class: 'btn ghost', 'aria-pressed': String(big), onclick: () => { big = !big; drawStage(); drawSide(); } }, ico('fit', 16), big ? 'Tilpass til skjermen' : 'Full størrelse');
       const namesBtn = h('button', { class: 'btn ghost', 'aria-pressed': String(showNames), onclick: () => { showNames = !showNames; drawStage(); drawSide(); } }, ico('eye', 16), showNames ? 'Skjul navn' : 'Vis navn');
-      side.appendChild(h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, tagBtn, namesBtn, sizeBtn));
+      side.appendChild(h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, tagBtn, cropBtn, rotBtn(-1), rotBtn(1), namesBtn, sizeBtn));
       const srcMode = isSource(p);
       if (tagging && !pending && !pre) side.appendChild(h('p', { class: 'muted', style: { fontSize: '14px' } }, (srcMode ? 'Trykk på navnet i teksten for å merke hvor personen står, eller legg til en person uten å peke på et sted.' : 'Trykk på ansiktet eller personen i bildet du vil tagge.')));
       if (tagging && pre){ const per = Store.persons.get(pre); side.appendChild(h('p', { class: 'muted', style: { fontSize: '14px' } }, 'Trykk på ' + (per ? fullName(per) : 'personen') + (srcMode ? ' i teksten for å sette merket.' : ' i bildet for å sette taggen.')));
@@ -1928,18 +2130,613 @@ const Photos = {
   }
 };
 
+/* ====== Aneside og etterkommerside ====== */
+const GEN_UP = ['Deg selv', 'Foreldre', 'Besteforeldre', 'Oldeforeldre', 'Tippoldeforeldre', 'Tipp-tippoldeforeldre'];
+const GEN_DOWN = ['', 'Barn', 'Barnebarn', 'Oldebarn', 'Tippoldebarn', 'Tipp-tippoldebarn'];
+const genUp = g => GEN_UP[g - 1] || ('Generasjon ' + g + ' bakover');
+const genDown = g => GEN_DOWN[g] || ('Generasjon ' + g + ' framover');
+const bookFrom = (patch) => { BookView.load(); Object.assign(BookView.o, patch); BookView.save(); App.go('book'); };
+
+const AncestorsView = {
+  mount(root, id){ this.root = root; this.id = id; this.render(); },
+  update(){ this.render(); },
+  render(){
+    const root = clear(this.root);
+    const p = Store.persons.get(this.id);
+    const back = h('button', { class: 'back', onclick: () => App.go('person', this.id) }, ico('back', 18), p ? fullName(p) : 'Tilbake');
+    if (!p){ root.append(back, h('div', { class: 'empty' }, h('h2', null, 'Fant ikke personen'))); return; }
+    const edit = Store.canWrite;
+    const levels = [[{ n: 1, p }]], seen = new Map([[p.id, 1]]), repeats = [];
+    for (let g = 1; g < 24; g++){
+      const next = [];
+      levels[g - 1].forEach(({ n, p: x }) => {
+        [[x.fatherId, 2 * n], [x.motherId, 2 * n + 1]].forEach(([pid, nn]) => {
+          const q = pid && Store.persons.get(pid); if (!q) return;
+          if (seen.has(pid)){ repeats.push({ n: nn, p: q, first: seen.get(pid) }); return; }
+          seen.set(pid, nn); next.push({ n: nn, p: q });
+        });
+      });
+      if (!next.length) break;
+      levels.push(next);
+    }
+    const total = seen.size - 1;
+    const full = levels.reduce((m, l, i) => l.length === Math.pow(2, i) ? i + 1 : m, 1);
+    const oldest = [...seen.keys()].map(i => Store.persons.get(i)).filter(x => x.birthYear != null).sort((a, b) => a.birthYear - b.birthYear)[0];
+    const head = h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Aner for ' + fullName(p)),
+      h('p', null, total ? plural(total, 'kjent stamfar eller stammor', 'kjente forfedre') + ' i ' + plural(levels.length - 1, 'generasjon', 'generasjoner') + (oldest && oldest.id !== p.id ? ' · eldste kjente ' + fullName(oldest) + ' (f. ' + oldest.birthYear + ')' : '') : 'Ingen foreldre er registrert ennå.')));
+    const acts = h('div', { class: 'acts', style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '14px' } },
+      h('button', { class: 'btn', onclick: () => App.go('tree', p.id) }, ico('tree', 16), 'Vis i slektstreet'),
+      h('button', { class: 'btn', onclick: () => bookFrom({ anc: true, ancRoot: p.id }) }, ico('book', 16), 'Lag bok av ahnetavlen'),
+      h('button', { class: 'btn ghost', onclick: () => App.go('descendants', p.id) }, 'Etterkommere'));
+    root.append(back, head, acts);
+    if (!total){ root.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' }, 'Legg til far eller mor på personsiden for å bygge opp ahnetavlen.'))); return; }
+    root.appendChild(h('p', { class: 'fnote' }, 'Nummereringen følger ahnetavlen: ' + (p.given || 'personen') + ' er nr. 1, faren nr. 2 og moren nr. 3. Far til person n har nr. 2n og mor nr. 2n+1. Antallet viser hvor mange av plassene i generasjonen som er fylt ut.'));
+    levels.forEach((lv, i) => {
+      const slots = Math.pow(2, i);
+      const rows = [...lv].sort((a, b) => a.n - b.n).map(({ n, p: x }) => {
+        const miss = [];
+        if (!x.fatherId || !Store.persons.has(x.fatherId)) miss.push('far');
+        if (!x.motherId || !Store.persons.has(x.motherId)) miss.push('mor');
+        return h('li', { class: 'an-row' }, h('span', { class: 'an-n' }, n), personChip(x, lifeSpan(x)),
+          h('span', { class: 'faint an-pl' }, x.birthPlace && x.birthPlace.name ? x.birthPlace.name : ''),
+          miss.length ? h('button', { class: 'btn sm ghost an-miss', onclick: () => App.go('person', x.id), 'aria-label': 'Mangler ' + miss.join(' og ') + ' for ' + fullName(x) }, 'Mangler ' + miss.join(' og ')) : null);
+      });
+      const rep = repeats.filter(r => Math.floor(Math.log2(r.n)) === i);
+      root.appendChild(h('section', { class: 'card' }, h('h2', null, genUp(i + 1), h('span', { class: 'faint an-cnt' }, i === 0 ? '' : lv.length + ' av ' + slots + (i > 0 && slots > 256 ? '' : ''))),
+        h('ul', { class: 'an-list' }, rows, rep.map(r => h('li', { class: 'an-row' }, h('span', { class: 'an-n' }, r.n), personChip(r.p, 'samme som nr. ' + r.first))))));
+    });
+  }
+};
+
+const DescendantsView = {
+  depth: 4, collapsed: new Set(),
+  mount(root, id){ this.root = root; this.id = id; this.collapsed = new Set(); this.render(); },
+  update(){ this.render(); },
+  render(){
+    const root = clear(this.root);
+    const p = Store.persons.get(this.id);
+    const back = h('button', { class: 'back', onclick: () => App.go('person', this.id) }, ico('back', 18), p ? fullName(p) : 'Tilbake');
+    if (!p){ root.append(back, h('div', { class: 'empty' }, h('h2', null, 'Fant ikke personen'))); return; }
+    const perGen = [];
+    const seen = new Set([p.id]);
+    const countBelow = new Map();
+    (function walk(id, g){
+      let n = 0;
+      Idx.kidsOf(id).forEach(c => { if (seen.has(c.id)) return; seen.add(c.id); perGen[g] = (perGen[g] || 0) + 1; n += 1 + walk(c.id, g + 1); });
+      countBelow.set(id, n); return n;
+    })(p.id, 1);
+    const total = seen.size - 1;
+    const living = [...seen].filter(i => i !== p.id).map(i => Store.persons.get(i)).filter(x => x.deathYear == null && (x.birthYear == null || NOW_YEAR - x.birthYear < 100)).length;
+    const head = h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Etterkommere av ' + fullName(p)),
+      h('p', null, total ? plural(total, 'etterkommer', 'etterkommere') + ' i ' + plural(perGen.length - 1, 'generasjon', 'generasjoner') + (living ? ' · ' + living + ' i live' : '') : 'Ingen barn er registrert ennå.')));
+    const acts = h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '14px' } },
+      h('button', { class: 'btn', onclick: () => App.go('tree', p.id) }, ico('tree', 16), 'Vis i slektstreet'),
+      h('button', { class: 'btn', onclick: () => bookFrom({ desc: true, descRoot: p.id }) }, ico('book', 16), 'Lag bok av etterkommerne'),
+      h('button', { class: 'btn ghost', onclick: () => App.go('ancestors', p.id) }, 'Aner'));
+    root.append(back, head, acts);
+    if (!total){ root.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' }, 'Legg til barn på personsiden for å bygge opp etterkommerlisten.'))); return; }
+    const stats = h('div', { class: 'ds-stats' }, perGen.map((n, g) => n ? h('div', null, h('b', null, n), h('span', null, genDown(g))) : null));
+    const depthSel = h('select', { class: 'inp', style: { width: 'auto' }, 'aria-label': 'Vis generasjoner', onchange: e => { this.depth = +e.target.value; this.render(); } },
+      [[1, 'Barn'], [2, 'Til barnebarn'], [3, 'Til oldebarn'], [4, '4 generasjoner'], [5, '5 generasjoner'], [99, 'Alle generasjoner']].map(([v, t]) => h('option', { value: v, selected: v === this.depth }, t)));
+    root.append(h('section', { class: 'card' }, h('h2', null, 'Oversikt'), stats), h('div', { class: 'tools' }, depthSel,
+      h('button', { class: 'btn sm ghost', onclick: () => { this.collapsed = new Set(); this.render(); } }, 'Åpne alle'),
+      h('button', { class: 'btn sm ghost', onclick: () => { this.collapsed = new Set([...seen].filter(i => (Idx.kids.get(i) || []).length)); this.render(); } }, 'Lukk alle')));
+    const ul = h('ul', { class: 'ds-list' });
+    const shown = new Set([p.id]);
+    const row = (x, d, parentId) => {
+      const kids = Idx.kidsOf(x.id);
+      const prts = Idx.partnersOf(x.id);
+      const closed = this.collapsed.has(x.id);
+      const hidden = d >= this.depth;
+      const other = parentId && prts.length ? null : null;
+      const li = h('li', { class: 'ds-row', style: { '--d': Math.min(d, 10) } },
+        kids.length && !hidden ? h('button', { class: 'ds-t', 'aria-expanded': String(!closed), 'aria-label': (closed ? 'Åpne' : 'Lukk') + ' ' + fullName(x), onclick: () => { if (closed) this.collapsed.delete(x.id); else this.collapsed.add(x.id); this.render(); } }, closed ? '▸' : '▾') : h('span', { class: 'ds-t' }),
+        h('div', { class: 'ds-b' }, personChip(x, lifeSpan(x)),
+          h('div', { class: 'faint ds-s' }, [prts.length ? 'gift med ' + prts.map(y => fullName(y.p) + (y.year != null ? ' (' + y.year + ')' : '')).join(' og ') : '', countBelow.get(x.id) ? plural(countBelow.get(x.id), 'etterkommer', 'etterkommere') + (hidden || closed ? ' skjult' : '') : ''].filter(Boolean).join(' · '))));
+      ul.appendChild(li);
+      if (!closed && !hidden) kids.forEach(c => { if (shown.has(c.id)) return; shown.add(c.id); row(c, d + 1, x.id); });
+    };
+    Idx.kidsOf(p.id).forEach(c => { if (shown.has(c.id)) return; shown.add(c.id); row(c, 0, p.id); });
+    root.appendChild(h('section', { class: 'card' }, ul));
+  }
+};
+
+/* ====== Bok til utskrift (A4) ====== */
+const BOOK_CSS = "/* Bokside: hvitt A4-ark med faste m\u00e5l, uavhengig av tema. */\n.page{position:relative;width:210mm;height:296.6mm;background:#fff;color:#1c1b19;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:10.5pt;line-height:1.42;overflow:hidden;box-sizing:border-box;padding:16mm 18mm 0 18mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;text-align:left}\n.page *{box-sizing:border-box}\n.pg-body{width:174mm;height:259mm;overflow:hidden;position:relative}\n.pg-foot{position:absolute;left:18mm;right:18mm;bottom:9mm;display:flex;justify-content:space-between;gap:10mm;font:8.5pt/1.2 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;border-top:.3mm solid #d9d5cb;padding-top:2mm}\n.pg-foot span:last-child{font-variant-numeric:tabular-nums}\n.bk-cover{height:259mm;display:flex;flex-direction:column;justify-content:center;gap:8mm;padding-bottom:20mm}\n.bk-cover .rule{width:34mm;height:1.4mm;background:#8a5a3c}\n.bk-cover h1{font:600 44pt/1.02 'Newsreader',Georgia,serif;letter-spacing:-.02em;margin:0;overflow-wrap:anywhere}\n.bk-cover .sub{font:italic 400 17pt/1.3 'Newsreader',Georgia,serif;color:#4c4a45;margin:0}\n.bk-cover .meta{font:9.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin:0}\n.bk-h1{font:600 24pt/1.1 'Newsreader',Georgia,serif;letter-spacing:-.015em;margin:0 0 5mm;padding-bottom:3mm;border-bottom:.5mm solid #8a5a3c}\n.bk-h2{font:600 19pt/1.12 'Newsreader',Georgia,serif;letter-spacing:-.01em;margin:0}\n.bk-sec{font:600 7.5pt/1.2 'Schibsted Grotesk',system-ui,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:#8a5a3c;margin:5mm 0 1.6mm}\n.bk-ph{display:flex;gap:5mm;align-items:center;padding-top:2mm;margin-top:2mm;border-top:.3mm solid #d9d5cb}\n.bk-ph.first{border-top:0;margin-top:0;padding-top:0}\n.bk-ph .av{border:.3mm solid #d9d5cb;background:#efece4;color:#5a5750;box-shadow:none}\n.bk-ph .t{min-width:0}\n.bk-life{font:9.5pt/1.3 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;margin-top:1mm;font-variant-numeric:tabular-nums}\n.bk-facts{display:grid;grid-template-columns:24mm 1fr;gap:1mm 4mm;margin:2mm 0 0}\n.bk-facts dt{font:600 8.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-facts dd{margin:0;overflow-wrap:anywhere}\n.bk-fam{display:grid;grid-template-columns:24mm 1fr;gap:1mm 4mm;margin:1mm 0 0}\n.bk-fam b{font:600 8.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-fam div{overflow-wrap:anywhere}\n.pref{display:inline-block;margin-left:.3em;min-width:3.6em;font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;white-space:nowrap}\n.bk-ev{display:grid;grid-template-columns:13mm 1fr;gap:.6mm 3mm;margin:0}\n.bk-ev .y{font:600 9pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;text-align:right;font-variant-numeric:tabular-nums}\n.bk-ev .s{font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-p{margin:0 0 2.4mm;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left}\n.bk-srcrefs{font:9pt/1.45 'Schibsted Grotesk',system-ui,sans-serif;color:#3d3b36;margin:0}\n.bk-srcrefs span.k{display:inline-block;min-width:6mm;font-weight:600;color:#8a5a3c}\n.bk-toc{display:grid;grid-template-columns:1fr auto;gap:2.4mm 6mm;margin-top:4mm;font-size:12pt}\n.bk-toc .n{font:600 10pt 'Schibsted Grotesk',system-ui,sans-serif;font-variant-numeric:tabular-nums;text-align:right;color:#5a5750}\n.bk-toc .d{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;display:block;margin-top:.4mm}\n.bk-fig{margin:0;min-width:0}\n.bk-figs{display:grid;grid-template-columns:1fr 1fr;gap:6mm;margin:0 0 5mm}\n.bk-figs .box{height:70mm;display:grid;place-items:center;background:#f3f1ec;border:.3mm solid #e1ddd3;overflow:hidden}\n.bk-figs img{max-width:100%;max-height:100%;display:block;object-fit:contain}\n.bk-figs figcaption{font:8.8pt/1.35 'Schibsted Grotesk',system-ui,sans-serif;color:#3d3b36;margin-top:1.4mm;height:12mm;overflow:hidden}\n.bk-figs figcaption b{font-weight:600}\n.bk-src{margin:0 0 6mm;break-inside:avoid}\n.bk-src .hd{display:flex;gap:3mm;align-items:baseline;margin-bottom:1.4mm}\n.bk-src .hd .k{font:600 12pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c}\n.bk-src .hd .t{font:600 11pt 'Newsreader',Georgia,serif}\n.bk-src .who{font:9pt/1.4 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;margin:0 0 2mm}\n.bk-src .img{display:grid;place-items:center;background:#f3f1ec;border:.3mm solid #e1ddd3;overflow:hidden}\n.bk-src .img img{max-width:100%;max-height:100%;display:block;object-fit:contain}\n.bk-tbl{width:100%;border-collapse:collapse;font-size:10pt}\n.bk-tbl th{font:600 8pt 'Schibsted Grotesk',system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#77746c;text-align:left;padding:0 2mm 1.4mm 0;border-bottom:.3mm solid #cfcabc}\n.bk-tbl td{padding:1.1mm 2mm 1.1mm 0;border-bottom:.2mm solid #ece9e1;vertical-align:top}\n.bk-tbl td.n{width:11mm;font:600 9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;font-variant-numeric:tabular-nums}\n.bk-tbl td.s{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750}\n.bk-gen{font:600 9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;margin:3mm 0 1.6mm}\n.bk-desc{margin:0;font-size:10pt;line-height:1.38}\n.bk-desc div{padding-left:calc(var(--d,0)*5mm);text-indent:-3mm;margin-left:3mm;overflow-wrap:anywhere}\n.bk-desc small{font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-reg{columns:2;column-gap:8mm;font-size:10pt;line-height:1.35;margin:0}\n.bk-reg div{break-inside:avoid;display:flex;justify-content:space-between;gap:3mm;padding:.35mm 0;border-bottom:.2mm dotted #d9d5cb}\n.bk-reg .p{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;white-space:nowrap}\n.bk-svg{display:block;width:174mm;margin:0}\n.bk-note{font:8.8pt/1.4 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin:2mm 0 0}\n";
+const MMPX = 96 / 25.4;
+const BOOK_DEF = {
+  title: 'Slekten', subtitle: '', cover: true, toc: true, tree: true, map: true,
+  anc: false, ancRoot: '', desc: false, descRoot: '',
+  persons: true, portrait: true, facts: true, family: true, life: true, notes: true, srcRefs: true, pagePerPerson: false,
+  photos: true, sources: true, srcImages: true, register: true, sort: 'name', selMode: 'all'
+};
+const escHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const sortPersons = (arr, how) => arr.sort(how === 'birth' ? ((a, b) => (a.birthYear == null) - (b.birthYear == null) || a.birthYear - b.birthYear || nameCmp(a, b)) : nameCmp);
+const placeName = pl => pl && pl.name ? pl.name : '';
+
+function splitText(t, max = 900){
+  const out = [];
+  let s = t.trim();
+  while (s.length > max){
+    let cut = s.lastIndexOf('. ', max);
+    if (cut < max * 0.5) cut = s.lastIndexOf(' ', max);
+    if (cut < 1) cut = max;
+    out.push(s.slice(0, cut + 1).trim());
+    s = s.slice(cut + 1).trim();
+  }
+  if (s) out.push(s);
+  return out;
+}
+
+function bookTreeSvg(set, maxW, maxH){
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: 'TB', nodesep: 10, ranksep: 30, marginx: 6, marginy: 6 });
+  g.setDefaultEdgeLabel(() => ({}));
+  const NW = 124, NH = 34;
+  set.forEach(id => g.setNode('p' + id, { width: NW, height: NH, kind: 'p', id }));
+  const unions = new Map();
+  const U = (a, b) => { const key = [a, b].filter(Boolean).sort().join('|'); if (!unions.has(key)) unions.set(key, { key, ids: [a, b].filter(Boolean), kids: [] }); return unions.get(key); };
+  set.forEach(id => { const p = Store.persons.get(id); const f = set.has(p.fatherId) ? p.fatherId : null, m = set.has(p.motherId) ? p.motherId : null; if (f || m) U(f, m).kids.push(id); });
+  set.forEach(id => Idx.partnersOf(id).forEach(x => { if (set.has(x.p.id) && id < x.p.id) U(id, x.p.id); }));
+  unions.forEach(u => { g.setNode('u' + u.key, { width: 4, height: 4, kind: 'u' }); u.ids.forEach(i => g.setEdge('p' + i, 'u' + u.key)); u.kids.forEach(k => g.setEdge('u' + u.key, 'p' + k)); });
+  dagre.layout(g);
+  const gw = g.graph().width, gh = g.graph().height;
+  let W = maxW, H = W * gh / gw;
+  if (H > maxH){ H = maxH; W = H * gw / gh; }
+  const svg = h('svg', { viewBox: '0 0 ' + gw + ' ' + gh, width: W, height: H, class: 'bk-svg', style: 'width:' + W + 'px;height:' + H + 'px' });
+  const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveMonotoneY);
+  g.edges().forEach(e => { const pts = g.edge(e).points; if (pts && pts.length) svg.appendChild(h('path', { d: line(pts), fill: 'none', stroke: '#b9b4a6', 'stroke-width': 0.9 })); });
+  g.nodes().forEach(nid => {
+    const n = g.node(nid);
+    if (n.kind === 'u'){ svg.appendChild(h('circle', { cx: n.x, cy: n.y, r: 2, fill: '#8a5a3c' })); return; }
+    const p = Store.persons.get(n.id);
+    const nm = fullName(p);
+    svg.appendChild(h('rect', { x: n.x - NW / 2, y: n.y - NH / 2, width: NW, height: NH, rx: 3, fill: '#fff', stroke: '#8a5a3c', 'stroke-width': 0.8 }));
+    svg.appendChild(h('text', { x: n.x, y: n.y - 3, 'text-anchor': 'middle', 'font-size': 9.5, 'font-family': 'Newsreader,Georgia,serif', 'font-weight': 600, fill: '#1c1b19' }, nm.length > 22 ? nm.slice(0, 21) + '…' : nm));
+    svg.appendChild(h('text', { x: n.x, y: n.y + 9, 'text-anchor': 'middle', 'font-size': 7.5, 'font-family': 'Schibsted Grotesk,system-ui,sans-serif', fill: '#6a675f' }, lifeSpan(p)));
+  });
+  return svg;
+}
+
+function bookMapSvg(pts, W, H){
+  initGeo();
+  const xy = pts.map(p => GEO.proj([p.lon, p.lat]));
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  xy.forEach(([x, y]) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); });
+  const pad = 0.14, dx = Math.max(x1 - x0, 14), dy = Math.max(y1 - y0, 14 * H / W);
+  const k = Math.min(1800, W / (dx * (1 + 2 * pad)), H / (dy * (1 + 2 * pad)));
+  const tx = W / 2 - k * (x0 + x1) / 2, ty = H / 2 - k * (y0 + y1) / 2;
+  const svg = h('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, class: 'bk-svg', style: 'width:' + W + 'px;height:' + H + 'px' });
+  svg.appendChild(h('rect', { width: W, height: H, fill: '#dde7ee' }));
+  const g = h('g', { transform: 'translate(' + tx + ',' + ty + ') scale(' + k + ')' });
+  const nse = 'vector-effect:non-scaling-stroke';
+  g.appendChild(h('path', { d: GEO.dLand, fill: '#f7f5ee', stroke: '#9fb0ba', 'stroke-width': 0.6, style: nse }));
+  g.appendChild(h('path', { d: GEO.dBorders, fill: 'none', stroke: '#bdc7cd', 'stroke-width': 0.5, 'stroke-dasharray': '3 2', style: nse }));
+  g.appendChild(h('path', { d: GEO.dKland, fill: '#f7f5ee', stroke: '#f7f5ee', 'stroke-width': 1, style: nse }));
+  if (k > 4) g.appendChild(h('path', { d: GEO.dKom, fill: 'none', stroke: '#d6dad2', 'stroke-width': 0.5, style: nse }));
+  g.appendChild(h('path', { d: GEO.dCounty, fill: 'none', stroke: '#a3b0b7', 'stroke-width': 0.7, style: nse }));
+  g.appendChild(h('path', { d: GEO.dKcoast, fill: 'none', stroke: '#9fb0ba', 'stroke-width': 0.6, style: nse }));
+  svg.appendChild(g);
+  const boxes = [];
+  const order = pts.map((p, i) => i).sort((a, b) => pts[b].n - pts[a].n);
+  order.forEach(i => {
+    const p = pts[i], x = tx + k * xy[i][0], y = ty + k * xy[i][1];
+    const r = Math.min(9, 3.5 + Math.sqrt(p.n) * 1.1);
+    svg.appendChild(h('circle', { cx: x, cy: y, r, fill: '#8a5a3c', 'fill-opacity': 0.85, stroke: '#fff', 'stroke-width': 1 }));
+    const txt = p.name + (p.n > 1 ? ' (' + p.n + ')' : '');
+    const w = txt.length * 5.4 + 4, bx = x + r + 2, by = y - 6;
+    if (!p.name || bx + w > W || boxes.some(b => bx < b.x + b.w && bx + w > b.x && by < b.y + 12 && by + 12 > b.y)) return;
+    boxes.push({ x: bx, y: by, w });
+    svg.appendChild(h('text', { x: bx, y: y + 3, 'font-size': 9.5, 'font-family': 'Schibsted Grotesk,system-ui,sans-serif', fill: '#1c1b19', stroke: '#fff', 'stroke-width': 2.4, 'paint-order': 'stroke', 'stroke-linejoin': 'round' }, txt));
+  });
+  return svg;
+}
+
+async function waitFonts(){
+  try {
+    await Promise.race([
+      Promise.all(['10.5pt Newsreader', '600 12pt Newsreader', 'italic 12pt Newsreader', '9pt "Schibsted Grotesk"', '600 9pt "Schibsted Grotesk"'].map(f => document.fonts.load(f))),
+      new Promise(r => setTimeout(r, 3500))
+    ]);
+  } catch (_) {}
+}
+
+/* Selve utlegget: tilordner innholdsblokker til A4-sider med faste mål. */
+async function composeBook(o, inc){
+  await waitFonts();
+  const persons = sortPersons([...inc].map(id => Store.persons.get(id)).filter(Boolean), o.sort);
+  const blocks = [], toc = [];
+  const B = (el, extra) => { blocks.push(Object.assign({ el }, extra || {})); return el; };
+  const pref = id => inc.has(id) && o.persons ? h('span', { class: 'pref', 'data-pid': id }, ' (s. 00)') : null;
+  const nameWithRef = p => [fullName(p), pref(p.id)];
+  const year = p => p.birthYear != null ? ' (f. ' + p.birthYear + ')' : '';
+  const section = (id, title, desc) => { toc.push({ id, title, desc }); B(h('h1', { class: 'bk-h1' }, title), { id, brk: 'before', keep: true }); };
+
+  // kilder og fotografier som hører til utvalget
+  const tagged = ph => (ph.tags || []).filter(t => inc.has(t.pid));
+  const allPh = [...Store.photos.values()].filter(ph => tagged(ph).length).sort((a, b) => (a.year || 9999) - (b.year || 9999) || (a.created || 0) - (b.created || 0));
+  const srcs = allPh.filter(isSource), photos = allPh.filter(ph => !isSource(ph));
+  const kNo = new Map(srcs.map((s, i) => [s.id, 'K' + (i + 1)]));
+
+  // slektstre
+  if (o.tree && inc.size > 1){
+    section('sec-tree', 'Slektstre', plural(inc.size, 'person', 'personer'));
+    B(bookTreeSvg(inc, 174 * MMPX, 215 * MMPX));
+    B(h('p', { class: 'bk-note' }, 'Treet viser de valgte personene med foreldre og partnere der de er med i utvalget.'));
+  }
+  // kart
+  if (o.map){
+    const m = new Map();
+    persons.forEach(p => timelineOf(p).forEach(e => { const key = e.place.lat.toFixed(3) + ',' + e.place.lon.toFixed(3); if (!m.has(key)) m.set(key, { lat: e.place.lat, lon: e.place.lon, name: e.place.name || '', ids: new Set() }); m.get(key).ids.add(p.id); }));
+    if (m.size){
+      section('sec-map', 'Kart over bosteder', plural(m.size, 'sted', 'steder'));
+      B(bookMapSvg([...m.values()].map(v => ({ lat: v.lat, lon: v.lon, name: v.name, n: v.ids.size })), 174 * MMPX, 200 * MMPX));
+      B(h('p', { class: 'bk-note' }, 'Hvert punkt er et sted der minst én person er født, har bodd eller døde. Tallet i parentes er hvor mange personer som har tilknytning til stedet.'));
+    }
+  }
+  // ahnetavle
+  if (o.anc && Store.persons.has(o.ancRoot)){
+    const root = Store.persons.get(o.ancRoot);
+    const rows = [];
+    (function rec(id, n){ const p = Store.persons.get(id); if (!p || rows.length > 1500) return; rows.push({ n, p }); rec(p.fatherId, n * 2); rec(p.motherId, n * 2 + 1); })(root.id, 1);
+    rows.sort((a, b) => a.n - b.n);
+    section('sec-anc', 'Ahnetavle for ' + fullName(root), plural(rows.length, 'person', 'personer'));
+    B(h('p', { class: 'bk-note' }, 'Nummereringen følger ahnetavlen: personen selv er nr. 1, faren nr. 2 og moren nr. 3. Far til person n har nr. 2n og mor nr. 2n+1.'), { keep: true });
+    let gen = 0, chunk = [];
+    const flush = () => { if (chunk.length){ B(h('table', { class: 'bk-tbl' }, h('tbody', null, chunk))); chunk = []; } };
+    rows.forEach(r => {
+      const g = Math.floor(Math.log2(r.n)) + 1;
+      if (g !== gen){ flush(); gen = g; B(h('div', { class: 'bk-gen' }, g === 1 ? 'Generasjon 1' : 'Generasjon ' + g + (g === 2 ? ' · foreldre' : g === 3 ? ' · besteforeldre' : g === 4 ? ' · oldeforeldre' : '')), { keep: true }); }
+      chunk.push(h('tr', null, h('td', { class: 'n' }, String(r.n)), h('td', null, nameWithRef(r.p)), h('td', { class: 's' }, lifeSpan(r.p)), h('td', { class: 's' }, placeName(r.p.birthPlace))));
+      if (chunk.length >= 20) flush();
+    });
+    flush();
+  }
+  // etterkommere
+  if (o.desc && Store.persons.has(o.descRoot)){
+    const root = Store.persons.get(o.descRoot);
+    const lines = [];
+    (function rec(id, d, path){
+      const p = Store.persons.get(id); if (!p || path.has(id) || lines.length > 1500) return;
+      const pts = Idx.partnersOf(id).map(x => x.p);
+      lines.push({ p, d, pts });
+      const np = new Set(path).add(id);
+      Idx.kidsOf(id).forEach(c => rec(c.id, d + 1, np));
+    })(root.id, 0, new Set());
+    section('sec-desc', 'Etterkommere av ' + fullName(root), plural(lines.length, 'person', 'personer'));
+    let chunk = [];
+    const flush = () => { if (chunk.length){ B(h('div', { class: 'bk-desc' }, chunk)); chunk = []; } };
+    lines.forEach(l => {
+      chunk.push(h('div', { style: { '--d': Math.min(l.d, 8) } }, nameWithRef(l.p), ' ', h('small', null, lifeSpan(l.p)), l.pts.length ? h('small', null, ' · gift med ' + l.pts.map(fullName).join(' og ')) : null));
+      if (chunk.length >= 34) flush();
+    });
+    flush();
+  }
+  // personkapitler
+  if (o.persons && persons.length){
+    section('sec-persons', 'Personer', plural(persons.length, 'person', 'personer'));
+    persons.forEach((p, idx) => {
+      const portrait = o.portrait && (Idx.photosOf.get(p.id) || []).some(x => !isSource(x.photo) && x.tag.x != null && x.photo.assetId);
+      B(h('div', { class: 'bk-ph' }, portrait ? avatar(p, 62) : null,
+        h('div', { class: 't' }, h('h2', { class: 'bk-h2' }, fullName(p)), h('div', { class: 'bk-life' }, lifeSpan(p) + (ageText(p) ? ' · ' + ageText(p) : '')))), { id: 'p' + p.id, brk: o.pagePerPerson && idx > 0 ? 'before' : null, keep: true });
+      if (o.facts){
+        const rows = [];
+        const b = [p.birthYear != null ? String(p.birthYear) : null, p.birthDate, placeName(p.birthPlace)].filter(Boolean).join(' · ');
+        const d = [p.deathYear != null ? String(p.deathYear) : null, p.deathDate, placeName(p.deathPlace)].filter(Boolean).join(' · ');
+        if (b) rows.push(['Født', b]);
+        if (d) rows.push(['Død', d]);
+        if (rows.length) B(h('dl', { class: 'bk-facts' }, rows.map(([k, v]) => [h('dt', null, k), h('dd', null, v)])));
+      }
+      if (o.family){
+        const par = [p.fatherId, p.motherId].map(i => Store.persons.get(i)).filter(Boolean);
+        const prt = Idx.partnersOf(p.id), kids = Idx.kidsOf(p.id), sib = Idx.siblingsOf(p);
+        const list = (arr, fn) => arr.map((x, i) => [i ? ', ' : '', fn(x)]);
+        const rows = [];
+        if (par.length) rows.push(['Foreldre', list(par, x => [nameWithRef(x), x.id === p.fatherId ? ' (far)' : ' (mor)'])]);
+        if (prt.length) rows.push(['Partner', list(prt, x => [nameWithRef(x.p), x.year != null ? ' (gift ' + x.year + ')' : ''])]);
+        if (kids.length) rows.push(['Barn', list(kids, x => [nameWithRef(x), year(x)])]);
+        if (sib.length) rows.push(['Søsken', list(sib, x => [nameWithRef(x), year(x)])]);
+        if (rows.length) B(h('div', { class: 'bk-fam' }, rows.map(([k, v]) => [h('b', null, k), h('div', null, v)])));
+      }
+      if (o.life){
+        const ev = lifeEvents(p).filter(e => e.k !== 'u' && e.k !== 'k' || true);
+        for (let i = 0; i < ev.length; i += 14){
+          const part = ev.slice(i, i + 14);
+          B(h('div', null, i === 0 ? h('div', { class: 'bk-sec' }, 'Livsløp') : null,
+            h('div', { class: 'bk-ev' }, part.map(e => [h('div', { class: 'y' }, e.y != null ? String(e.y) : '–'), h('div', null, e.t, e.s ? h('span', { class: 's' }, ' · ' + e.s) : null)]))));
+        }
+      }
+      if (o.notes && p.notes && p.notes.trim()){
+        const paras = p.notes.split(/\n{2,}/).flatMap(t => splitText(t));
+        paras.forEach((t, i) => B(h('div', null, i === 0 ? h('div', { class: 'bk-sec' }, 'Notater') : null, h('p', { class: 'bk-p' }, t)), i === 0 ? { keep: false } : {}));
+      }
+      if (o.srcRefs && o.sources){
+        const mine = srcs.filter(s => (s.tags || []).some(t => t.pid === p.id));
+        if (mine.length) B(h('div', null, h('div', { class: 'bk-sec' }, 'Kilder'), h('p', { class: 'bk-srcrefs' }, mine.map(s => h('div', null, h('span', { class: 'k' }, kNo.get(s.id)), [s.srcType || 'Kilde', s.ref, s.year].filter(Boolean).join(', '), h('span', { class: 'pref', 'data-sid': s.id }, ' (s. 00)'))))));
+      }
+    });
+  }
+  // fotografier
+  if (o.photos && photos.length){
+    section('sec-photos', 'Fotografier', plural(photos.length, 'bilde', 'bilder'));
+    for (let i = 0; i < photos.length; i += 2){
+      B(h('div', { class: 'bk-figs' }, photos.slice(i, i + 2).map(ph => {
+        const names = tagged(ph).map(t => Store.persons.get(t.pid)).filter(Boolean).slice(0, 6).map(fullName).join(', ');
+        return h('figure', { class: 'bk-fig' }, h('div', { class: 'box' }, h('img', { src: photoUrl(ph), alt: ph.caption || '', 'data-asset': ph.assetId, 'data-max': 1800 })),
+          h('figcaption', null, [ph.year ? h('b', null, ph.year + ' ') : null, ph.caption || '', names ? (ph.caption || ph.year ? ' · ' : '') + names : '']));
+      })));
+    }
+  }
+  // kilder
+  if (o.sources && srcs.length){
+    section('sec-src', 'Kilder', plural(srcs.length, 'kilde', 'kilder'));
+    srcs.forEach(s => {
+      const who = tagged(s).map(t => Store.persons.get(t.pid)).filter(Boolean).map(fullName).join(', ');
+      const kids = [h('div', { class: 'hd' }, h('span', { class: 'k' }, kNo.get(s.id)), h('span', { class: 't' }, [s.srcType || 'Kilde', s.year].filter(Boolean).join(' · '))),
+        s.ref ? h('p', { class: 'bk-p', style: { margin: '0 0 1mm' } }, s.ref) : null,
+        s.caption ? h('p', { class: 'bk-p', style: { margin: '0 0 1mm' } }, s.caption) : null,
+        h('p', { class: 'who' }, 'Nevner: ' + who)];
+      if (o.srcImages){
+        const wpx = 174 * MMPX, hmax = 195 * MMPX;
+        const hpx = s.w && s.h ? Math.min(hmax, wpx * s.h / s.w) : 120 * MMPX;
+        kids.push(h('div', { class: 'img', style: { height: hpx + 'px' } }, h('img', { src: photoUrl(s), alt: '', 'data-asset': s.assetId, 'data-max': 2600 })));
+      }
+      B(h('div', { class: 'bk-src' }, kids), { id: 's' + s.id });
+    });
+  }
+  // register
+  if (o.register){
+    section('sec-reg', 'Navneregister', plural(persons.length, 'person', 'personer'));
+    const sorted = [...persons].sort(nameCmp);
+    for (let i = 0; i < sorted.length; i += 46){
+      B(h('div', { class: 'bk-reg' }, sorted.slice(i, i + 46).map(p => h('div', null,
+        h('span', null, (p.family ? p.family + ', ' : '') + (p.given || ''), ' ', h('span', { class: 'p' }, lifeSpan(p))),
+        o.persons ? h('span', { class: 'p', 'data-pid': p.id }, 's. 00') : null))));
+    }
+  }
+
+  /* --- paginering --- */
+  const holder = h('div', { style: 'position:fixed;left:-10000px;top:0;visibility:hidden;pointer-events:none' });
+  document.body.appendChild(holder);
+  const offset = (o.cover ? 1 : 0) + (o.toc ? 1 : 0);
+  const pagesArr = [];
+  const newPage = () => { const body = h('div', { class: 'pg-body' }); const art = h('article', { class: 'page' }, body); holder.appendChild(art); pagesArr.push({ art, body }); return pagesArr[pagesArr.length - 1]; };
+  const pageOf = {};
+  let cur = newPage();
+  const over = pg => pg.body.scrollHeight > pg.body.clientHeight + 1;
+  blocks.forEach(blk => {
+    if (blk.brk === 'before' && cur.body.children.length) cur = newPage();
+    cur.body.appendChild(blk.el);
+    if (over(cur) && cur.body.children.length > 1){
+      cur.body.removeChild(blk.el);
+      const moved = [blk.el];
+      let last = cur.body.lastElementChild;
+      while (last && last._keep && cur.body.children.length > 1){ cur.body.removeChild(last); moved.unshift(last); last = cur.body.lastElementChild; }
+      cur = newPage();
+      moved.forEach(m => cur.body.appendChild(m));
+    }
+    blk.el._keep = !!blk.keep;
+    if (blk.id) pageOf[blk.id] = pagesArr.indexOf(cur) + 1 + offset;
+  });
+  if (!pagesArr[pagesArr.length - 1].body.children.length && pagesArr.length > 1) pagesArr.pop().art.remove();
+  pagesArr.forEach(pg => { const f = pg.body.firstElementChild; if (f && f.classList.contains('bk-ph')) f.classList.add('first'); });
+
+  // sidetall og henvisninger
+  const final = [];
+  const foot = (n, lbl) => h('div', { class: 'pg-foot' }, h('span', null, 'Slektsboka' + (o.title ? ' · ' + o.title : '')), h('span', null, String(n)));
+  if (o.cover){
+    const ys = persons.map(p => p.birthYear).filter(y => y != null);
+    final.push(h('article', { class: 'page' }, h('div', { class: 'pg-body' }, h('div', { class: 'bk-cover' }, h('div', { class: 'rule' }),
+      h('h1', null, o.title || 'Slekten'), o.subtitle ? h('p', { class: 'sub' }, o.subtitle) : null,
+      h('p', { class: 'meta' }, plural(persons.length, 'person', 'personer') + (ys.length ? ' · fra ' + Math.min(...ys) + ' til i dag' : '') + '\nUtarbeidet ' + new Date().toLocaleDateString('nb-NO', { day: 'numeric', month: 'long', year: 'numeric' }), ))
+    )));
+    final[0].querySelector('.meta').style.whiteSpace = 'pre-line';
+  }
+  if (o.toc){
+    const entries = toc.map(t => [h('div', null, t.title, t.desc ? h('span', { class: 'd' }, t.desc) : null), h('div', { class: 'n' }, String(pageOf[t.id] || ''))]);
+    final.push(h('article', { class: 'page' }, h('div', { class: 'pg-body' }, h('h1', { class: 'bk-h1' }, 'Innhold'), h('div', { class: 'bk-toc' }, entries)), foot(final.length + 1)));
+  }
+  pagesArr.forEach(pg => { pg.art.remove(); pg.art.appendChild(foot(final.length + 1)); final.push(pg.art); });
+  holder.remove();
+  final.forEach(a => {
+    a.querySelectorAll('.pref[data-pid]').forEach(s => { const n = pageOf['p' + s.dataset.pid]; if (n) s.textContent = ' (s. ' + n + ')'; else s.remove(); });
+    a.querySelectorAll('.pref[data-sid]').forEach(s => { const n = pageOf['s' + s.dataset.sid]; if (n) s.textContent = ' (s. ' + n + ')'; else s.remove(); });
+    a.querySelectorAll('.p[data-pid]').forEach(s => { const n = pageOf['p' + s.dataset.pid]; s.textContent = n ? 's. ' + n : ''; });
+  });
+  return { pages: final, count: final.length, persons: persons.length };
+}
+
+/* ====== Lagre som egen HTML-fil (når utskrift ikke er mulig i visningen) ====== */
+async function blobToDataUrl(blob, max){
+  const bmp = await createImageBitmap(blob);
+  const s = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * s); cv.height = Math.round(bmp.height * s);
+  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+  if (bmp.close) bmp.close();
+  return cv.toDataURL('image/jpeg', 0.86);
+}
+async function inlineBookImages(root){
+  const imgs = [...root.querySelectorAll('img[data-asset]')];
+  for (let i = 0; i < imgs.length; i++){
+    const im = imgs[i];
+    try { im.src = await blobToDataUrl(await assetBlob(im.dataset.asset), +im.dataset.max || 1800); } catch (_) { im.removeAttribute('src'); }
+  }
+}
+function bookDocHtml(pagesHtml, title){
+  return '<!doctype html><html lang="nb"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + escHtml(title) + '</title>' +
+    '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,400..600&family=Schibsted+Grotesk:wght@400..800&display=swap">' +
+    '<style>' + BOOK_CSS + '\n.av{position:relative;flex:none;width:var(--s,40px);height:var(--s,40px);border-radius:max(3px,calc(var(--s,40px)*.09));overflow:hidden;display:grid;place-items:center}.av img{position:absolute;max-width:none;display:block}\nbody{margin:0;background:#8d8a82;font-family:system-ui,sans-serif}.bar{position:sticky;top:0;z-index:5;display:flex;gap:12px;align-items:center;justify-content:center;padding:10px;background:#1e2b36;color:#fff;font-size:14px}.bar button{font:inherit;font-weight:600;padding:8px 16px;border-radius:8px;border:0;background:#c99a74;color:#1b1209;cursor:pointer}.page{margin:14px auto;box-shadow:0 2px 14px rgba(0,0,0,.35)}' +
+    '@page{size:A4;margin:0}@media print{.bar{display:none}body{background:#fff}.page{margin:0;box-shadow:none;break-after:page;page-break-after:always}.page:last-child{break-after:auto;page-break-after:auto}}</style></head><body>' +
+    '<div class="bar"><button onclick="window.print()">Skriv ut eller lagre som PDF</button><span>Velg papirstørrelse A4 og ingen marger.</span></div>' + pagesHtml + '</body></html>';
+}
+
+/* ====== Visning ====== */
+const BookView = {
+  o: null, sel: new Set(), result: null,
+  load(){
+    if (this.o) return;
+    this.o = Object.assign({}, BOOK_DEF);
+    try { const s = JSON.parse(localStorage.getItem('slekt.book') || 'null'); if (s){ Object.assign(this.o, s.o || {}); this.sel = new Set(s.sel || []); } } catch (_) {}
+  },
+  save(){ try { localStorage.setItem('slekt.book', JSON.stringify({ o: this.o, sel: [...this.sel] })); } catch (_) {} },
+  included(){ return this.o.selMode === 'all' ? new Set(Store.persons.keys()) : new Set([...this.sel].filter(id => Store.persons.has(id))); },
+  mount(root){
+    this.load(); this.root = root; this.result = null;
+    this.ui = h('div', { class: 'bookui' });
+    this.prev = h('div', { class: 'bookprev', hidden: true });
+    this.bar = h('div', { class: 'bookbar' });
+    root.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Bok til utskrift'), h('p', null, 'Velg hva som skal være med, se forhåndsvisningen og skriv ut hele boken i A4-format.'))), this.ui, this.bar, this.prev);
+    this.draw();
+    this.ro = new ResizeObserver(() => this.scale());
+    this.ro.observe(root);
+  },
+  update(){ if (this.o.selMode === 'pick') this.drawList(); this.fillRoots(); },
+  unmount(){ if (this.ro) this.ro.disconnect(); },
+  scale(){ const w = this.prev.clientWidth - 24; if (w > 0) this.prev.style.setProperty('--sc', String(Math.min(1, w / (210 * MMPX)))); },
+  chk(key, label, hint){
+    const o = this.o;
+    const id = 'bk-' + key;
+    return h('label', { class: 'bk-chk', for: id }, h('input', { type: 'checkbox', id, checked: !!o[key], onchange: e => { o[key] = e.target.checked; this.save(); this.draw(); } }), h('span', null, label, hint ? h('small', null, hint) : null));
+  },
+  rootSel(key){
+    const o = this.o;
+    const sel = h('select', { class: 'inp', 'aria-label': 'Utgangsperson', onchange: e => { o[key] = e.target.value; this.save(); } });
+    sel._key = key; this.rootSels = (this.rootSels || []).concat(sel);
+    return sel;
+  },
+  fillRoots(){
+    (this.rootSels || []).forEach(sel => {
+      const key = sel._key;
+      clear(sel);
+      const ps = [...Store.persons.values()].sort(nameCmp);
+      if (!ps.some(p => p.id === this.o[key]) && ps.length) this.o[key] = (ps.find(p => p.id === this.o[key]) || ps[0]).id;
+      ps.forEach(p => sel.appendChild(h('option', { value: p.id, selected: p.id === this.o[key] }, fullName(p) + (p.birthYear != null ? ' (f. ' + p.birthYear + ')' : ''))));
+    });
+  },
+  draw(){
+    const o = this.o;
+    this.rootSels = [];
+    const ancRow = o.anc ? h('div', { class: 'bk-sub' }, h('label', { class: 'lbl' }, 'Ahnetavle for'), this.rootSel('ancRoot')) : null;
+    const descRow = o.desc ? h('div', { class: 'bk-sub' }, h('label', { class: 'lbl' }, 'Etterkommere av'), this.rootSel('descRoot')) : null;
+    const personOpts = o.persons ? h('div', { class: 'bk-sub bk-grid' }, this.chk('portrait', 'Portrett'), this.chk('facts', 'Født og død'), this.chk('family', 'Familie'), this.chk('life', 'Livsløp og bosteder'), this.chk('notes', 'Notater'), this.chk('srcRefs', 'Kildehenvisninger'), this.chk('pagePerPerson', 'Hver person på ny side')) : null;
+    const srcOpts = o.sources ? h('div', { class: 'bk-sub' }, this.chk('srcImages', 'Ta med bildene av kildene')) : null;
+    const nSel = this.included().size;
+    clear(this.ui).append(
+      h('section', { class: 'card' }, h('h2', null, 'Innhold'),
+        h('div', { class: 'bk-grid' }, this.chk('cover', 'Forside'), this.chk('toc', 'Innholdsfortegnelse'), this.chk('tree', 'Slektstre', 'tegning av de valgte personene'), this.chk('map', 'Kart over bosteder')),
+        h('div', { class: 'bk-grid' }, this.chk('anc', 'Ahnetavle', 'forfedre i nummerert liste'), this.chk('desc', 'Etterkommere', 'inndelt oversikt')), ancRow, descRow,
+        h('div', { class: 'bk-grid' }, this.chk('persons', 'Personkapitler', 'én fortelling per person')), personOpts,
+        h('div', { class: 'bk-grid' }, this.chk('photos', 'Fotografier', 'med navn på dem som er tagget'), this.chk('sources', 'Kilder', 'kirkebøker, bygdebøker og avisutklipp')), srcOpts,
+        h('div', { class: 'bk-grid' }, this.chk('register', 'Navneregister', 'med sidehenvisninger'))),
+      h('section', { class: 'card' }, h('h2', null, 'Personer'),
+        h('div', { class: 'seg', role: 'group', 'aria-label': 'Hvilke personer' },
+          h('button', { type: 'button', 'aria-pressed': String(o.selMode === 'all'), onclick: () => { o.selMode = 'all'; this.save(); this.draw(); } }, 'Alle (' + Store.persons.size + ')'),
+          h('button', { type: 'button', 'aria-pressed': String(o.selMode === 'pick'), onclick: () => { o.selMode = 'pick'; if (!this.sel.size) this.sel = new Set(Store.persons.keys()); this.save(); this.draw(); } }, 'Utvalg' + (o.selMode === 'pick' ? ' (' + nSel + ')' : ''))),
+        o.selMode === 'pick' ? this.pickUi() : null),
+      h('section', { class: 'card' }, h('h2', null, 'Tittel og rekkefølge'),
+        h('div', { class: 'fgrid' },
+          h('div', { class: 'half-m' }, h('label', { class: 'lbl', for: 'bk-title' }, 'Tittel'), h('input', { class: 'inp', id: 'bk-title', value: o.title, oninput: e => { o.title = e.target.value; this.save(); } })),
+          h('div', { class: 'half-m' }, h('label', { class: 'lbl', for: 'bk-sub' }, 'Undertittel'), h('input', { class: 'inp', id: 'bk-sub', value: o.subtitle, placeholder: 'f.eks. Haugen-slekten fra Voss', oninput: e => { o.subtitle = e.target.value; this.save(); } })),
+          h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Personene sorteres etter'), h('div', { class: 'seg', role: 'group' },
+            h('button', { type: 'button', 'aria-pressed': String(o.sort === 'name'), onclick: () => { o.sort = 'name'; this.save(); this.draw(); } }, 'Etternavn'),
+            h('button', { type: 'button', 'aria-pressed': String(o.sort === 'birth'), onclick: () => { o.sort = 'birth'; this.save(); this.draw(); } }, 'Fødselsår'))))));
+    this.fillRoots();
+    clear(this.bar);
+    this.makeBtn = h('button', { class: 'btn primary', onclick: () => this.make() }, ico('eye', 18), this.result ? 'Lag forhåndsvisning på nytt' : 'Lag forhåndsvisning');
+    this.bar.append(this.makeBtn);
+    if (this.result) this.actions();
+  },
+  pickUi(){
+    const o = this.o;
+    const rootSel = h('select', { class: 'inp', 'aria-label': 'Utgangsperson for hurtigvalg' });
+    const fill = () => { clear(rootSel); [...Store.persons.values()].sort(nameCmp).forEach(p => rootSel.appendChild(h('option', { value: p.id }, fullName(p) + (p.birthYear != null ? ' (f. ' + p.birthYear + ')' : '')))); };
+    fill();
+    const apply = mode => { const id = rootSel.value; if (!id) return; const s = treeSet(mode, id); this.sel = mode === 'all' ? new Set(Store.persons.keys()) : s; this.save(); this.drawList(); this.countLabel(); };
+    this.search = h('input', { class: 'inp', type: 'search', placeholder: 'Søk i listen …', 'aria-label': 'Søk', oninput: () => this.drawList() });
+    this.listEl = h('div', { class: 'bk-list' });
+    this.drawList();
+    return h('div', { class: 'bk-pick' },
+      h('div', { class: 'bk-sub' }, h('label', { class: 'lbl' }, 'Hurtigvalg fra person'), rootSel,
+        h('div', { class: 'bk-quick' },
+          h('button', { class: 'btn sm', onclick: () => apply('anc') }, 'Aner'), h('button', { class: 'btn sm', onclick: () => apply('desc') }, 'Etterkommere'), h('button', { class: 'btn sm', onclick: () => apply('line') }, 'Aner og etterkommere'),
+          h('button', { class: 'btn sm ghost', onclick: () => { this.sel = new Set(Store.persons.keys()); this.save(); this.drawList(); this.countLabel(); } }, 'Velg alle'),
+          h('button', { class: 'btn sm ghost', onclick: () => { this.sel = new Set(); this.save(); this.drawList(); this.countLabel(); } }, 'Fjern alle'))),
+      this.search, this.listEl);
+  },
+  countLabel(){ const b = this.ui.querySelectorAll('.seg button')[1]; if (b) b.textContent = 'Utvalg (' + this.included().size + ')'; },
+  drawList(){
+    if (!this.listEl) return;
+    const q = norm(this.search ? this.search.value : '');
+    clear(this.listEl);
+    [...Store.persons.values()].filter(p => !q || norm(fullName(p)).includes(q)).sort(nameCmp).forEach(p => {
+      const id = 'bkp-' + p.id;
+      this.listEl.appendChild(h('label', { class: 'bk-row', for: id }, h('input', { type: 'checkbox', id, checked: this.sel.has(p.id), onchange: e => { if (e.target.checked) this.sel.add(p.id); else this.sel.delete(p.id); this.save(); this.countLabel(); } }),
+        avatar(p, 28), h('span', { class: 'n' }, fullName(p)), h('span', { class: 'faint' }, lifeSpan(p))));
+    });
+  },
+  async make(){
+    const inc = this.included();
+    if (!inc.size){ toast('Velg minst én person.'); return; }
+    this.makeBtn.disabled = true;
+    toast('Lager boken …');
+    await new Promise(r => setTimeout(r, 40));
+    try {
+      this.result = await composeBook(this.o, inc);
+      this.show();
+      toast('Boken er ' + plural(this.result.count, 'side', 'sider'));
+    } catch (e){ console.error(e); toast('Kunne ikke lage boken.'); }
+    this.draw();
+  },
+  show(){
+    clear(this.prev); this.prev.hidden = false;
+    this.result.pages.forEach(pg => this.prev.appendChild(h('div', { class: 'pgwrap' }, pg)));
+    this.scale();
+    setTimeout(() => { try { this.prev.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {} }, 60);
+  },
+  actions(){
+    const info = h('span', { class: 'muted' }, plural(this.result.count, 'side', 'sider') + ' · ' + plural(this.result.persons, 'person', 'personer'));
+    this.bar.append(info);
+    if (LOCAL_MODE){
+      this.bar.append(h('button', { class: 'btn primary', onclick: () => this.print() }, ico('upload', 16), 'Skriv ut eller lagre som PDF'));
+      this.bar.append(h('button', { class: 'btn', onclick: e => this.saveHtml(e.currentTarget) }, 'Lagre som HTML-fil'));
+    } else {
+      this.bar.append(h('button', { class: 'btn primary', onclick: e => this.saveHtml(e.currentTarget) }, ico('upload', 16), 'Lagre boken som fil'));
+      this.bar.append(h('p', { class: 'fnote', style: { flexBasis: '100%', margin: 0 } }, 'Utskrift er ikke mulig direkte i denne visningen. Lagre boken som en HTML-fil, åpne den i nettleseren og velg Skriv ut. Direkte utskrift fungerer i GitHub-versjonen.'));
+    }
+  },
+  async print(){
+    const imgs = [...this.prev.querySelectorAll('img')];
+    await Promise.all(imgs.map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; })));
+    const done = () => { document.body.classList.remove('printing-book'); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    document.body.classList.add('printing-book');
+    try { window.print(); } catch (_) { done(); }
+  },
+  async saveHtml(btn){
+    btn.disabled = true; toast('Pakker bildene inn i filen …');
+    try {
+      const clones = this.result.pages.map(a => a.cloneNode(true));
+      const wrap = h('div', null, clones);
+      await inlineBookImages(wrap);
+      const html = bookDocHtml(clones.map(c => c.outerHTML).join('\n'), (this.o.title || 'Slekten') + ' – Slektsboka');
+      await saveFile(new Blob([html], { type: 'text/html' }), 'slektsboka-bok-' + todayStr() + '.html');
+    } catch (e){ console.error(e); toast('Kunne ikke lage filen.'); }
+    btn.disabled = false;
+  }
+};
+
 /* ====== Appskall ====== */
 const App = {
   view: 'register', arg: null, cur: null,
-  views: { register: RegisterView, person: PersonView, tree: TreeView, map: MapView, photos: Photos },
-  tabOf: { register: 'register', person: 'register', tree: 'tree', map: 'map', photos: 'photos' },
+  views: { register: RegisterView, person: PersonView, tree: TreeView, map: MapView, photos: Photos, ancestors: AncestorsView, descendants: DescendantsView, book: BookView },
+  tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
     this.tabEls = {};
-    [['register', 'users', 'Register'], ['tree', 'tree', 'Slektstre'], ['map', 'pin', 'Kart'], ['photos', 'image', 'Bilder']].forEach(([k, ic, t]) => {
+    [['register', 'users', 'Register'], ['tree', 'tree', 'Slektstre'], ['map', 'pin', 'Kart'], ['photos', 'image', 'Bilder'], ['book', 'book', 'Bok']].forEach(([k, ic, t]) => {
       const b = h('button', { class: 'tab', role: 'tab', 'aria-selected': 'false', onclick: () => this.go(k) }, ico(ic, 20), h('span', null, t));
       this.tabEls[k] = b; tabs.appendChild(b);
     });
@@ -1947,7 +2744,8 @@ const App = {
     let v = 'register', a = null;
     try {
       const hs = (location.hash || '').replace('#', '');
-      if (hs === 'tre') v = 'tree'; else if (hs === 'kart') v = 'map'; else if (hs === 'bilder') v = 'photos';
+      if (hs === 'tre') v = 'tree'; else if (hs === 'kart') v = 'map'; else if (hs === 'bilder') v = 'photos'; else if (hs === 'bok') v = 'book';
+      else if (hs.startsWith('aner-')){ v = 'ancestors'; a = hs.slice(5); } else if (hs.startsWith('etterkommere-')){ v = 'descendants'; a = hs.slice(13); }
       else if (hs.startsWith('p-')){ v = 'person'; a = hs.slice(2); }
     } catch (_) {}
     this.go(v, a);
