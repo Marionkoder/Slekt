@@ -160,31 +160,37 @@ const GAZ = (() => {
   let arr = null;
   return () => {
     if (arr) return arr;
-    arr = window.__D.gaz.map(r => ({ name: r[0], sub: r[1], lat: r[2], lon: r[3], kom: r[4] === 1, n: norm(r[0]) }));
+    arr = window.__D.gaz.map(r => ({ name: r[0], sub: r[1], lat: r[2], lon: r[3], kom: r[4] === 1, hist: r[4] === 2, now: r[5] || '', n: norm(r[0]) }));
     return arr;
   };
 })();
-function searchPlaces(q, limit = 8){
+/* Steder som allerede er brukt på personer (for gjenbruk, inkl. gårder). */
+function usedPlaces(){
+  const used = new Map();
+  Store.persons.forEach(p => {
+    [p.birthPlace, p.deathPlace, ...(p.moves || []).map(m => m.place)].forEach(x => {
+      if (x && x.lat != null && x.name) used.set(x.name + '|' + x.lat.toFixed(3) + '|' + x.lon.toFixed(3), x);
+    });
+  });
+  return [...used.values()];
+}
+const placeLabel = pl => pl ? [pl.farm, pl.kom != null ? pl.kom : (pl.farm ? '' : pl.name), pl.region].filter(Boolean).join(', ') || pl.name || '' : '';
+function searchPlaces(q, limit = 8, o = {}){
   const nq = norm(q);
   if (nq.length < 2) return [];
   const out = [], seen = new Set();
-  const used = new Map();
-  Store.persons.forEach(p => {
-    const pl = [p.birthPlace, p.deathPlace, ...(p.moves || []).map(m => m.place)];
-    pl.forEach(x => { if (x && x.lat != null && x.name) used.set(x.name + '|' + x.lat.toFixed(2) + '|' + x.lon.toFixed(2), x); });
-  });
-  used.forEach(x => { if (norm(x.name).includes(nq)) { out.push({ label: x.name, sub: 'brukt før', place: { name: x.name, lat: x.lat, lon: x.lon } }); seen.add(norm(x.name)); } });
+  if (!o.onlyGaz) usedPlaces().forEach(x => { if (norm(x.name).includes(nq) && !seen.has(norm(x.name))){ out.push({ label: x.name, sub: 'brukt før', place: clone(x) }); seen.add(norm(x.name)); } });
   const g = GAZ();
   const starts = [], inc = [];
   for (const r of g){
     if (r.n.startsWith(nq)) starts.push(r);
     else if (starts.length < 40 && r.n.includes(nq)) inc.push(r);
-    if (starts.length > 60) break;
+    if (starts.length > 80) break;
   }
-  starts.sort((a, b) => (b.kom - a.kom) || 0);
+  starts.sort((a, b) => ((b.kom || b.hist) - (a.kom || a.hist)) || 0);
   for (const r of [...starts, ...inc]){
     if (out.length >= limit) break;
-    out.push({ label: r.name, sub: r.sub + (r.kom ? ' · kommune' : ''), place: { name: r.name, lat: r.lat, lon: r.lon } });
+    out.push({ label: r.name, sub: r.sub + (r.kom ? ' · kommune' : ''), place: { name: r.name, lat: r.lat, lon: r.lon, kom: r.name, now: r.now || undefined, approx: r.hist ? 1 : undefined } });
   }
   return out.slice(0, limit);
 }
@@ -273,7 +279,18 @@ const Store = {
   onChange(fn){ this.listeners.add(fn); return () => this.listeners.delete(fn); },
   emit(){
     if (this._raf) return;
-    this._raf = requestAnimationFrame(() => { this._raf = 0; Idx.rebuild(); this.listeners.forEach(f => { try { f(); } catch (e) { console.error(e); } }); });
+    this._raf = requestAnimationFrame(() => { this._raf = 0; Idx.rebuild(); this._cleanFlags(); this.listeners.forEach(f => { try { f(); } catch (e) { console.error(e); } }); });
+  },
+  /* «Ingen kjente barn/søsken» fjernes automatisk når slike er registrert. */
+  _cleanFlags(){
+    if (!this.canWrite) return;
+    this.persons.forEach(p => {
+      if (!p.noKids && !p.noSiblings) return;
+      const q = clone(p); let ch = false;
+      if (q.noKids && Idx.kidsOf(p.id).length){ delete q.noKids; ch = true; }
+      if (q.noSiblings && Idx.siblingsOf(p).length){ delete q.noSiblings; ch = true; }
+      if (ch){ this.persons.set(q.id, q); this._write('persons', q); }
+    });
   },
   async init(){
     if (LOCAL_MODE) return this.initLocal();
@@ -825,17 +842,24 @@ function createBaseMap(host, opts = {}){
 }
 
 /* ====== Stedsfelt og kartvelger ====== */
-function openPlacePicker(cur, cb){
+function openPlacePicker(cur, cb, o = {}){
   const host = h('div', { class: 'pick' });
   const search = h('input', { class: 'inp', type: 'search', placeholder: 'Søk etter sted for å flytte kartet dit…', autocomplete: 'off', 'aria-label': 'Søk etter sted' });
   const sw = h('div', { class: 'pf' }, search);
   const status = h('div', { class: 'faint', style: { fontSize: '13px' } }, 'Trykk i kartet for å sette punktet. Dra og zoom for å finne riktig sted.');
   const useBtn = h('button', { class: 'btn primary', type: 'button', disabled: true }, 'Bruk dette punktet');
-  const body = h('div', { class: 'modal-b' }, sw, host, status, h('div', { class: 'form-actions', style: { position: 'static', borderTop: '0', padding: '0', margin: '0' } }, h('span'), useBtn));
+  const sugBox = h('div', { class: 'sugbox' });
+  const sugQ = h('input', { class: 'inp', type: 'text', placeholder: 'Stedsnavn å søke etter på nett', value: o.query || '', 'aria-label': 'Søk på nett' });
+  const sugWhere = h('select', { class: 'inp', 'aria-label': 'Hvor' }, h('option', { value: 'no' }, 'Norge (Kartverket)'), h('option', { value: 'world' }, 'Utlandet (OpenStreetMap)'));
+  if (cur && cur.lat != null && (cur.lat < 57 || cur.lat > 72 || cur.lon < 4 || cur.lon > 32)) sugWhere.value = 'world';
+  const sugBtn = h('button', { class: 'btn ghost sm', type: 'button' }, 'Foreslå sted');
+  const sugList = h('div', { class: 'suglist' });
+  sugBox.append(h('div', { class: 'faint', style: { fontSize: '13px' } }, 'Forslag fra nett. Ingenting settes før du trykker på et forslag og så «Bruk dette punktet».'), h('div', { class: 'sugrow' }, sugQ, sugWhere, sugBtn), sugList);
+  const body = h('div', { class: 'modal-b' }, sw, host, status, sugBox, h('div', { class: 'form-actions', style: { position: 'static', borderTop: '0', padding: '0', margin: '0' } }, h('span'), useBtn));
   const modal = openModal('Velg sted på kartet', body, { cls: 'wide' });
   const base = createBaseMap(host, {});
   let pt = cur && cur.lat != null ? { lat: cur.lat, lon: cur.lon } : null;
-  let pickedName = null;
+  let pickedName = null, sugName = null;
   const pin = h('div', { class: 'pin' });
   pin.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 22s-7-6-7-12a7 7 0 0 1 14 0c0 6-7 12-7 12z" fill="#8A5A3C" stroke="#fff" stroke-width="1.6"/><circle cx="12" cy="10" r="2.6" fill="#fff"/></svg>';
   pin.style.display = 'none';
@@ -856,9 +880,35 @@ function openPlacePicker(cur, cb){
   base.svg.addEventListener('click', e => {
     const r = host.getBoundingClientRect();
     const [lon, lat] = base.fromScreen(e.clientX - r.left, e.clientY - r.top);
-    pickedName = null;
+    pickedName = null; sugName = null;
     setPt({ lat: +lat.toFixed(4), lon: +lon.toFixed(4) });
   });
+  async function suggest(){
+    const q = sugQ.value.trim(); if (q.length < 2) return;
+    clear(sugList); sugList.append(h('div', { class: 'faint' }, 'Søker…')); sugBtn.disabled = true;
+    let items = [];
+    try {
+      if (sugWhere.value === 'no'){
+        const r = await fetch('https://ws.geonorge.no/stedsnavn/v1/navn?sok=' + encodeURIComponent(q) + '&fuzzy=true&treffPerSide=12&utkoordsys=4258');
+        const j = await r.json();
+        items = (j.navn || []).map(n => ({ name: n.skrivemåte || (n.stedsnavn && n.stedsnavn[0] && n.stedsnavn[0].skrivemåte), type: n.navneobjekttype, where: [(n.kommuner || []).map(k => k.kommunenavn).join('/'), (n.fylker || []).map(k => k.fylkesnavn).join('/')].filter(Boolean).join(', '), lat: n.representasjonspunkt && n.representasjonspunkt.nord, lon: n.representasjonspunkt && n.representasjonspunkt.øst })).filter(x => x.name && x.lat != null);
+      } else {
+        const r = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&addressdetails=1&accept-language=nb&q=' + encodeURIComponent(q));
+        const j = await r.json();
+        items = j.map(n => ({ name: (n.name || n.display_name.split(',')[0]), type: n.type, where: n.display_name.split(',').slice(1, 4).join(',').trim(), lat: +n.lat, lon: +n.lon }));
+      }
+    } catch (e){ console.error(e); clear(sugList); sugList.append(h('div', { class: 'faint' }, 'Fikk ikke kontakt med søketjenesten. Du kan fortsatt trykke i kartet.')); sugBtn.disabled = false; return; }
+    sugBtn.disabled = false; clear(sugList);
+    if (!items.length){ sugList.append(h('div', { class: 'faint' }, 'Ingen forslag. Prøv en annen stavemåte, eller trykk i kartet.')); return; }
+    items.forEach(it => sugList.append(h('button', { type: 'button', class: 'sugit', onclick: () => {
+      pickedName = null; sugName = it.name;
+      base.fit([[it.lon, it.lat]], { minSpan: 0.6, animate: true });
+      setPt({ lat: +(+it.lat).toFixed(4), lon: +(+it.lon).toFixed(4) });
+      status.textContent = 'Forslag: ' + it.name + (it.where ? ' (' + it.where + ')' : '') + '. Sjekk at punktet stemmer, og trykk «Bruk dette punktet».';
+    } }, h('b', null, it.name), h('span', { class: 'faint' }, [it.type, it.where].filter(Boolean).join(' · ')))));
+  }
+  sugBtn.addEventListener('click', suggest);
+  sugQ.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); suggest(); } });
   autocomplete(search, q => searchPlaces(q), it => {
     pickedName = it.place.name;
     base.fit([[it.place.lon, it.place.lat]], { minSpan: 5, animate: true });
@@ -869,29 +919,62 @@ function openPlacePicker(cur, cb){
     if (!pt) return;
     const out = { lat: pt.lat, lon: pt.lon };
     out.name = pickedName || kommuneAt(pt.lon, pt.lat) || null;
+    out.sugName = sugName;
     base.destroy(); modal.close(); cb(out);
   });
 }
 
+const pn = pl => pl.name + (pl.now ? ' (nå ' + pl.now + ')' : '');
 function placeField(initial, onChange, o = {}){
   let v = initial ? clone(initial) : { name: '', lat: null, lon: null };
-  const wrap = h('div', { class: 'pf' });
-  const inp = h('input', { class: 'inp', type: 'text', placeholder: o.placeholder || 'Sted, f.eks. Voss eller Chicago', value: v.name || '', autocomplete: 'off', 'aria-label': o.label || 'Sted' });
+  if (v.kom === undefined && v.name && v.farm === undefined) v._kom0 = v.name;
+  const wrap = h('div', { class: 'pfs' });
+  const W = el => h('div', { class: 'pf' }, el);
+  const komInp = h('input', { class: 'inp', type: 'text', placeholder: o.placeholder || 'Kommune eller sted, f.eks. Hosanger, Voss eller Chicago', value: v.kom != null ? v.kom : (v.name || ''), autocomplete: 'off', 'aria-label': (o.label || 'Sted') + ' – kommune' });
+  const farmInp = h('input', { class: 'inp', type: 'text', placeholder: 'Gård eller sted i kommunen (valgfritt)', value: v.farm || '', autocomplete: 'off', 'aria-label': (o.label || 'Sted') + ' – gård/sted' });
+  const regInp = h('input', { class: 'inp', type: 'text', placeholder: 'Region/land, f.eks. Minnesota, USA (valgfritt)', value: v.region || '', autocomplete: 'off', 'aria-label': (o.label || 'Sted') + ' – region/land' });
   const st = h('div', { class: 'st' });
-  wrap.append(inp, st);
-  const out = () => (v.name || v.lat != null) ? { name: v.name || '', lat: v.lat, lon: v.lon } : null;
+  const nowEl = h('div', { class: 'faint pf-now' });
+  wrap.append(W(komInp), nowEl, W(farmInp), W(regInp), st);
+  const compose = () => {
+    v.kom = komInp.value.trim(); v.farm = farmInp.value.trim(); v.region = regInp.value.trim();
+    v.name = [v.farm, v.kom, v.region].filter(Boolean).join(', ');
+    ['kom', 'farm', 'region', 'now'].forEach(k => { if (!v[k]) delete v[k]; });
+    delete v._kom0;
+  };
+  const out = () => { const c = clone(v); delete c._kom0; return (c.name || c.lat != null) ? { ...c, name: c.name || '', lat: c.lat != null ? c.lat : null, lon: c.lon != null ? c.lon : null } : null; };
   function status(){
-    clear(st);
+    clear(st); clear(nowEl);
+    if (v.now) nowEl.textContent = 'Nå en del av ' + v.now + (v.approx && v.pos !== 'manual' ? ' · punktet er omtrentlig (midt i dagens kommune)' : '');
     const btn = h('button', { type: 'button', class: 'btn ghost sm', onclick: () => openPlacePicker(v, pt => {
-      v.lat = pt.lat; v.lon = pt.lon;
-      if (!v.name && pt.name){ v.name = pt.name; inp.value = pt.name; }
-      onChange(out()); status();
-    }) }, ico('pin', 15), v.lat != null ? 'Flytt på kartet' : 'Velg på kartet');
-    if (v.lat != null){ st.className = 'st ok'; st.append(h('span', null, '✓ På kartet (' + v.lat.toFixed(2) + ', ' + v.lon.toFixed(2) + ')'), btn); }
+      v.lat = pt.lat; v.lon = pt.lon; v.pos = 'manual'; delete v.approx;
+      if (pt.sugName && !farmInp.value.trim() && (komInp.value.trim() || '').toLowerCase() !== pt.sugName.toLowerCase()) farmInp.value = pt.sugName;
+      if (!komInp.value.trim() && pt.name) komInp.value = pt.name;
+      compose(); onChange(out()); status();
+    }, { query: farmInp.value.trim() || komInp.value.trim() }) }, ico('pin', 15), v.lat != null ? 'Flytt på kartet' : 'Velg på kartet');
+    if (v.lat != null){ st.className = 'st ok'; st.append(h('span', null, '✓ På kartet' + (v.approx && v.pos !== 'manual' ? ' (omtrentlig)' : '')), btn); }
     else { st.className = 'st'; st.append(h('span', null, 'Ikke plassert på kartet ennå'), btn); }
   }
-  inp.addEventListener('input', () => { v.name = inp.value; onChange(out()); });
-  autocomplete(inp, q => searchPlaces(q), it => { v = { name: it.place.name, lat: it.place.lat, lon: it.place.lon }; inp.value = v.name; onChange(out()); status(); });
+  const upd = () => { compose(); onChange(out()); };
+  komInp.addEventListener('input', () => { v.now = ''; upd(); });
+  farmInp.addEventListener('input', upd); regInp.addEventListener('input', upd);
+  autocomplete(komInp, q => searchPlaces(q, 8), it => {
+    const pl = it.place;
+    komInp.value = pl.kom || pl.name;
+    if (pl.farm){ farmInp.value = pl.farm; }
+    if (pl.region !== undefined && pl.region) regInp.value = pl.region;
+    v.now = pl.now || ''; v.approx = pl.approx; v.lat = pl.lat; v.lon = pl.lon; v.pos = pl.farm ? 'manual' : 'kom';
+    compose(); onChange(out()); status();
+  });
+  // gjenbruk gårder som er brukt før i samme kommune
+  autocomplete(farmInp, q => {
+    const k = komInp.value.trim().toLowerCase(), nq = norm(q);
+    if (!k || nq.length < 1) return [];
+    return usedPlaces().filter(x => x.farm && x.kom && x.kom.toLowerCase() === k && norm(x.farm).includes(nq)).slice(0, 6).map(x => ({ label: x.farm, sub: 'brukt før · ' + x.kom, place: x }));
+  }, it => {
+    farmInp.value = it.place.farm; v.lat = it.place.lat; v.lon = it.place.lon; v.pos = 'manual'; delete v.approx;
+    compose(); onChange(out()); status();
+  });
   status();
   return wrap;
 }
@@ -1020,6 +1103,7 @@ function openPersonForm(opts = {}){
 
   const given = h('input', { class: 'inp', value: f.given || '', autocomplete: 'off', autofocus: true, oninput: e => f.given = e.target.value });
   const family = h('input', { class: 'inp', value: f.family || '', autocomplete: 'off', oninput: e => f.family = e.target.value });
+  const patInp = h('input', { class: 'inp', value: f.patronym || '', autocomplete: 'off', placeholder: 'f.eks. Olsen eller Olsdatter', oninput: e => f.patronym = e.target.value });
   const birthName = h('input', { class: 'inp', value: f.birthName || '', autocomplete: 'off', placeholder: 'Hvis annet enn etternavnet, f.eks. pikenavn', oninput: e => f.birthName = e.target.value });
   const sexBtns = {};
   const sexSeg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Kjønn' }, [['m', 'Mann'], ['f', 'Kvinne'], ['u', 'Ukjent']].map(([k, t]) => sexBtns[k] = h('button', { type: 'button', 'aria-pressed': String(f.sex === k), onclick: () => { f.sex = k; Object.entries(sexBtns).forEach(([kk, b]) => b.setAttribute('aria-pressed', String(kk === k))); } }, t)));
@@ -1073,12 +1157,15 @@ function openPersonForm(opts = {}){
     modal.close(); await Store.deletePerson(f.id); toast('Personen er slettet'); App.go('register');
   });
   const saveBtn = h('button', { type: 'submit', class: 'btn primary' }, 'Lagre');
-  const form = h('form', { class: 'modal-b', novalidate: true, onsubmit: async e => {
+  const patWrap = fld('Patronym (valgfritt)', patInp, 'full');
+  const patUpd = () => { patWrap.style.display = ((f.birthYear != null && f.birthYear < 1900) || (f.patronym || '').trim()) ? '' : 'none'; };
+  patUpd();
+  const form = h('form', { class: 'modal-b', novalidate: true, oninput: patUpd, onsubmit: async e => {
     e.preventDefault();
     if (!(f.given || '').trim() && !(f.family || '').trim()){ given.focus(); toast('Skriv inn et navn først.'); return; }
     saveBtn.disabled = true;
     const o = clone(f);
-    o.given = (o.given || '').trim(); o.family = (o.family || '').trim(); o.birthName = (o.birthName || '').trim();
+    o.given = (o.given || '').trim(); o.family = (o.family || '').trim(); o.birthName = (o.birthName || '').trim(); o.patronym = (o.patronym || '').trim(); if (!o.patronym) delete o.patronym;
     o.birthPlace = o.birthPlace && (o.birthPlace.name || o.birthPlace.lat != null) ? o.birthPlace : null;
     o.deathPlace = o.deathPlace && (o.deathPlace.name || o.deathPlace.lat != null) ? o.deathPlace : null;
     o.moves = (o.moves || []).filter(m => m.place && (m.place.name || m.place.lat != null)).sort((a, b) => (a.year == null) - (b.year == null) || (a.year || 0) - (b.year || 0));
@@ -1104,7 +1191,7 @@ function openPersonForm(opts = {}){
     if (opts.onSaved) opts.onSaved(saved);
     toast(editing ? 'Endringene er lagret' : 'Personen er lagt til');
   } },
-    h('div', { class: 'fgrid' }, fld('Fornavn', given, 'half-m'), fld('Etternavn', family, 'half-m'), fld('Fødenavn', birthName, 'full'), fld('Kjønn', sexSeg, 'full')),
+    h('div', { class: 'fgrid' }, fld('Fornavn', given, 'half-m'), fld('Etternavn', family, 'half-m'), fld('Fødenavn', birthName, 'full'), patWrap, fld('Kjønn', sexSeg, 'full')),
     h('div', { class: 'fs' }, h('h3', null, 'Født'),
       h('div', { class: 'fgrid' }, fld('År', yearInp('birthYear', 'f.eks. 1872'), 'half-m'), fld('Dato eller detaljer', textInp('birthDate', 'f.eks. 12. mars'), 'half-m'),
         fld('Fødested', placeField(f.birthPlace, pl => f.birthPlace = pl, { label: 'Fødested' }), 'full'))),
@@ -1305,12 +1392,13 @@ const PersonView = {
     const facts = h('dl', { class: 'facts' });
     const row = (k, v) => { if (v) facts.append(h('dt', null, k), h('dd', null, v)); };
     row('Født som', p.birthName || '');
-    row('Født', [p.birthYear != null ? String(p.birthYear) : null, p.birthDate, p.birthPlace && p.birthPlace.name].filter(Boolean).join(' · '));
+    row('Patronym', p.patronym || '');
+    row('Født', [p.birthYear != null ? String(p.birthYear) : null, p.birthDate, p.birthPlace && pn(p.birthPlace)].filter(Boolean).join(' · '));
     row('Dødsårsak', p.deathCause || '');
-    row('Død', [p.deathYear != null ? String(p.deathYear) : null, p.deathDate, p.deathPlace && p.deathPlace.name].filter(Boolean).join(' · ') || (isDead(p) ? 'Ja, tidspunkt ukjent' : ''));
+    row('Død', [p.deathYear != null ? String(p.deathYear) : null, p.deathDate, p.deathPlace && pn(p.deathPlace)].filter(Boolean).join(' · ') || (isDead(p) ? 'Ja, tidspunkt ukjent' : ''));
     row('Kjønn', p.sex === 'm' ? 'Mann' : p.sex === 'f' ? 'Kvinne' : '');
     const lastMove = (p.moves || []).filter(m => m.place && m.place.name).slice(-1)[0];
-    row(isDead(p) ? 'Siste bosted' : 'Bosted', lastMove ? lastMove.place.name + (lastMove.year != null ? ' (fra ' + lastMove.year + ')' : '') : '');
+    row(isDead(p) ? 'Siste bosted' : 'Bosted', lastMove ? pn(lastMove.place) + (lastMove.year != null ? ' (fra ' + lastMove.year + ')' : '') : '');
     const factsCard = h('section', { class: 'card' }, h('h2', null, 'Fakta'), facts.children.length ? facts : h('p', { class: 'muted' }, 'Ingen opplysninger er lagt inn ennå.'));
 
     // familie
@@ -2671,6 +2759,7 @@ async function composeBook(o, inc){
         const rows = [];
         const b = [p.birthYear != null ? String(p.birthYear) : null, p.birthDate, placeName(p.birthPlace)].filter(Boolean).join(' · ');
         const d = [p.deathYear != null ? String(p.deathYear) : null, p.deathDate, placeName(p.deathPlace)].filter(Boolean).join(' · ') || (isDead(p) ? 'tidspunkt ukjent' : '');
+        if (p.patronym) rows.push(['Patronym', p.patronym]);
         if (b) rows.push(['Født', b]);
         if (d) rows.push(['Død', d]);
         if (p.deathCause) rows.push(['Dødsårsak', p.deathCause]);
