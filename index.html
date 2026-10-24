@@ -383,6 +383,38 @@ button.ds-t:hover{background:var(--surface-2)}
   body.printing-book .pgwrap .page{transform:none}
 }
 
+.partner-item{display:grid;gap:8px;padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.rowline2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:start}
+.modal-b > .rowline2{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.fgrid .bk-chk.full{grid-column:1/-1}
+
+.gen-h{font-family:var(--display);font-size:20px;margin:18px 0 8px}
+
+.none-note{margin:6px 0 0;font-size:14px}
+.fs > .bk-chk{margin-top:8px}
+
+.st-bigs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:14px 22px;margin-bottom:14px}
+.st-col{display:grid;gap:12px;align-content:start}
+.st-big{display:grid;gap:1px}
+.st-big b{font-family:var(--display);font-size:32px;line-height:1.1;letter-spacing:-.01em}
+.st-big span{font-size:14px;color:var(--ink-2)}
+.st-big small{font-size:12.5px;color:var(--ink-3)}
+.st-h3{font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:6px 0 4px}
+.st-tbl-wrap{overflow-x:auto;margin:6px 0}
+.st-tbl{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+.st-tbl th,.st-tbl td{padding:7px 10px 7px 0;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+.st-tbl thead th{font-size:12px;color:var(--ink-3);font-weight:600}
+.st-tbl th:first-child,.st-tbl td:first-child{text-align:left}
+.st-bars{display:grid;gap:5px}
+.st-bar{display:grid;grid-template-columns:44px minmax(0,1fr) 34px;gap:8px;align-items:center;font-size:13px}
+.st-bar .l{color:var(--ink-2);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-bar .b{height:14px;background:var(--surface-2);border-radius:4px;overflow:hidden}
+.st-bar .b i{display:block;height:100%;background:var(--accent);border-radius:4px;min-width:0}
+.st-bar .v{font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.st-bars.wide .st-bar{grid-template-columns:minmax(80px,32%) minmax(0,1fr) 34px}
+
+.pvpages{display:flex;gap:10px;align-items:center;justify-content:center;margin-top:8px}
+
 /* Bokside: hvitt A4-ark med faste mål, uavhengig av tema. */
 .page{position:relative;width:210mm;height:296.6mm;background:#fff;color:#1c1b19;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:10.5pt;line-height:1.42;overflow:hidden;box-sizing:border-box;padding:16mm 18mm 0 18mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;text-align:left}
 .page *{box-sizing:border-box}
