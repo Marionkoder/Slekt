@@ -1347,7 +1347,8 @@ const RegisterView = {
     clear(this.head).appendChild(h('div', { class: 'page-h' },
       h('div', null, h('h1', null, 'Personregister'),
         h('p', null, n ? plural(n, 'person', 'personer') + (ys.length ? ' · eldste kjente fødselsår ' + Math.min(...ys) : '') : 'Ingen personer ennå')),
-      Store.canWrite ? h('button', { class: 'btn primary', onclick: () => openPersonForm({ onSaved: p => App.go('person', p.id) }) }, ico('plus', 18), 'Ny person') : null));
+      h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, n > 1 ? h('button', { class: 'btn', onclick: () => App.go('kinship') }, ico('users', 16), 'Slektskap') : null,
+        Store.canWrite ? h('button', { class: 'btn primary', onclick: () => openPersonForm({ onSaved: p => App.go('person', p.id) }) }, ico('plus', 18), 'Ny person') : null)));
     this.tools.style.display = n ? '' : 'none';
     this.list();
     clear(this.backupHost);
@@ -1429,6 +1430,7 @@ const PersonView = {
           edit ? h('button', { class: 'btn', onclick: () => openPortraitEditor(p) }, ico('image', 16), 'Profilbilde') : null,
           h('button', { class: 'btn', onclick: () => App.go('ancestors', p.id) }, ico('users', 16), 'Aner'),
           h('button', { class: 'btn', onclick: () => App.go('descendants', p.id) }, ico('users', 16), 'Etterkommere'),
+          h('button', { class: 'btn', onclick: () => App.go('kinship', p.id) }, ico('users', 16), 'Slektskap'),
           h('button', { class: 'btn', onclick: () => App.go('tree', p.id) }, ico('tree', 16), 'Vis i slektstreet'),
           h('button', { class: 'btn', onclick: () => App.go('map', p.id) }, ico('pin', 16), 'Vis på kartet'))));
 
@@ -2640,6 +2642,132 @@ const StatsView = {
   }
 };
 
+/* ====== Slektskap mellom to personer ====== */
+function kinCore(aId, bId, parentsFn){
+  const anc = id => { const m = new Map([[id, { d: 0, path: [id] }]]); let fr = [id];
+    while (fr.length){ const nx = []; fr.forEach(i => { const p = Store.persons.get(i); if (!p) return; const e = m.get(i); parentsFn(p).forEach(q => { if (!m.has(q) && Store.persons.has(q)){ m.set(q, { d: e.d + 1, path: e.path.concat([q]) }); nx.push(q); } }); }); fr = nx; }
+    return m; };
+  const A = anc(aId), B = anc(bId);
+  let best = null;
+  A.forEach((ea, id) => { const eb = B.get(id); if (!eb) return; const s = ea.d + eb.d; if (!best || s < best.s || (s === best.s && Math.abs(ea.d - eb.d) < Math.abs(best.da - best.db))) best = { s, da: ea.d, db: eb.d }; });
+  if (!best) return null;
+  const common = []; A.forEach((ea, id) => { const eb = B.get(id); if (eb && ea.d === best.da && eb.d === best.db) common.push({ id, pa: ea.path, pb: eb.path }); });
+  return { da: best.da, db: best.db, common };
+}
+const poss = n => n + (/[sxz]$/i.test(n) ? "'" : 's');
+/* Hva er «other» for «me», gitt da/db (da: steg fra me til felles stamforelder, db: fra other). */
+function kinWord(da, db, sexOther, count, pathMe, sexOfParentMe){
+  const sx = (m, f) => sexOther === 'm' ? m : sexOther === 'f' ? f : m + '/' + f;
+  const parSex = id => { const p = Store.persons.get(id); return p ? p.sex : 'u'; };
+  if (da === 0 && db === 0) return 'samme person';
+  if (da === 0){ return db === 1 ? sx('sønn', 'datter') : db === 2 ? 'barnebarn' : db === 3 ? 'oldebarn' : db === 4 ? 'tippoldebarn' : 'etterkommer i ' + db + '. ledd'; }
+  if (db === 0){
+    if (da === 1) return sx('far', 'mor');
+    if (da === 2){ const s = parSex(pathMe[1]); return s === 'm' ? sx('farfar', 'farmor') : s === 'f' ? sx('morfar', 'mormor') : sx('bestefar', 'bestemor'); }
+    return da === 3 ? sx('oldefar', 'oldemor') : da === 4 ? sx('tippoldefar', 'tippoldemor') : 'ane i ' + da + '. ledd';
+  }
+  if (da === 1 && db === 1){ const w = sx('bror', 'søster'); return count === 1 ? 'halv' + (sexOther === 'm' ? 'bror' : sexOther === 'f' ? 'søster' : 'søsken') : (sexOther === 'm' || sexOther === 'f' ? w : 'søsken'); }
+  if (da === 1) return db === 2 ? sx('nevø', 'niese') : db === 3 ? sx('grandnevø', 'grandniese') : 'søskens ' + (db === 4 ? 'oldebarn' : db === 5 ? 'tippoldebarn' : 'etterkommer i ' + (db - 1) + '. ledd');
+  if (db === 1){
+    if (da === 2){ const s = parSex(pathMe[1]); return s === 'm' ? sx('farbror', 'faster') : s === 'f' ? sx('morbror', 'moster') : sx('onkel', 'tante'); }
+    return da === 3 ? sx('grandonkel', 'grandtante') : 'søsken til ' + (da === 4 ? 'en oldeforelder' : da === 5 ? 'en tippoldeforelder' : 'en ane i ' + (da - 1) + '. ledd');
+  }
+  const m = Math.min(da, db), d = Math.abs(da - db);
+  if (da === 2 && db === 2) return 'søskenbarn (' + sx('fetter', 'kusine') + ')';
+  if (da === 2 && db === 3) return 'søskenbarns barn';
+  if (da === 3 && db === 2) return 'forelders søskenbarn';
+  const base = m === 2 ? 'søskenbarn' : m === 3 ? 'tremenning' : m === 4 ? 'firemenning' : m === 5 ? 'femmenning' : m + '-menning';
+  return d === 0 ? base : base + ', ' + d + (d === 1 ? ' generasjon ' : ' generasjoner ') + (da > db ? 'eldre' : 'yngre');
+}
+/* Finn slektskapet. Returnerer { kind, text, rev, how[] } eller null. */
+function kinship(aId, bId){
+  const A = Store.persons.get(aId), B = Store.persons.get(bId);
+  if (!A || !B) return null;
+  if (aId === bId) return { text: 'Dette er samme person.', how: [] };
+  const nm = p => fullName(p);
+  const chain = path => path.map(i => nm(Store.persons.get(i))).join(' → ');
+  const tryKind = (fn, label) => {
+    const r = kinCore(aId, bId, fn); if (!r) return null;
+    const c = r.common.length;
+    const wB = kinWord(r.da, r.db, B.sex, c, r.common[0].pa), wA = kinWord(r.db, r.da, A.sex, c, r.common[0].pb);
+    const how = [];
+    if (r.da > 0 || r.db > 0){
+      const anc = r.common.map(x => nm(Store.persons.get(x.id))).join(' og ');
+      if (r.da > 0 && r.db > 0) how.push('Felles ' + (c > 1 ? 'stamforeldre' : 'stamforelder') + ': ' + anc + '.');
+      r.common.slice(0, 2).forEach(x => { if (x.pa.length > 1) how.push(nm(A) + ' → ' + chain(x.pa.slice(1)) + ' (forelder-linje oppover)'); if (x.pb.length > 1) how.push(nm(B) + ' → ' + chain(x.pb.slice(1)) + ' (forelder-linje oppover)'); });
+    }
+    return { kind: label, text: nm(B) + ' er ' + poss(nm(A)) + ' ' + wB + '.', rev: nm(A) + ' er ' + poss(nm(B)) + ' ' + wA + '.', how, wB, da: r.da, db: r.db };
+  };
+  const bio = tryKind(bioParentsOf, 'biologisk');
+  if (bio) return bio;
+  const legal = tryKind(parentsOf, 'juridisk');
+  if (legal){ legal.note = 'Dette er juridisk slektskap (via medforelder eller adopsjon/stefamilie-registrering), ikke biologisk.'; return legal; }
+  // partnere og svogerskap
+  const sx = (m, f) => B.sex === 'm' ? m : B.sex === 'f' ? f : m + '/' + f;
+  const prt = id => Idx.partnersOf(id).filter(x => relKind(x) !== 'foreldre');
+  const direct = Idx.partnersOf(aId).find(x => x.p.id === bId);
+  if (direct){
+    if (relKind(direct) === 'foreldre') return { kind: 'partner', text: nm(B) + ' og ' + nm(A) + ' har barn sammen.', how: [] };
+    return { kind: 'partner', text: nm(B) + ' er ' + REL_WITH[relKind(direct)] + ' ' + nm(A) + (relDates(direct) ? ' (' + relDates(direct) + ')' : '') + '.', how: [] };
+  }
+  const sp = Idx.stepParentsOf(A).find(x => x.p.id === bId); if (sp) return { kind: 'steg', text: nm(B) + ' er ' + poss(nm(A)) + ' ' + sx('stefar', 'stemor') + '.', how: [] };
+  const sk = Idx.stepKidsOf(A).find(x => x.p.id === bId); if (sk) return { kind: 'steg', text: nm(B) + ' er ' + poss(nm(A)) + ' stebarn.', how: [] };
+  for (const x of prt(aId)){
+    const r = tryKind0(x.p.id, bId);
+    if (r){
+      const w = r.da === 1 && r.db === 0 ? sx('svigerfar', 'svigermor') : (r.da === 1 && r.db === 1) ? sx('svoger', 'svigerinne') : null;
+      if (w) return { kind: 'svogerskap', text: nm(B) + ' er ' + poss(nm(A)) + ' ' + w + ' (' + nm(x.p) + ' er ' + REL_NOUN[relKind(x)] + ' med ' + nm(A) + ').', how: [] };
+      return { kind: 'svogerskap', text: nm(B) + ' er ' + poss(nm(x.p)) + ' ' + r.wB + ', og ' + nm(x.p) + ' er ' + REL_NOUN[relKind(x)] + ' med ' + nm(A) + '.', how: [] };
+    }
+  }
+  for (const y of prt(bId)){
+    const r = tryKind0(aId, y.p.id);
+    if (r){
+      const w = r.da === 1 && r.db === 1 ? sx('svoger', 'svigerinne') : (r.da === 0 && r.db === 1) ? sx('svigersønn', 'svigerdatter') : null;
+      if (w) return { kind: 'svogerskap', text: nm(B) + ' er ' + poss(nm(A)) + ' ' + w + ' (' + nm(B) + ' er ' + REL_NOUN[relKind(y)] + ' med ' + nm(y.p) + ').', how: [] };
+      return { kind: 'svogerskap', text: nm(B) + ' er ' + REL_NOUN[relKind(y)] + ' med ' + nm(y.p) + ', som er ' + poss(nm(A)) + ' ' + r.wB + '.', how: [] };
+    }
+  }
+  return null;
+  function tryKind0(x, y){ const r = kinCore(x, y, bioParentsOf); if (!r) return null; const Y = Store.persons.get(y); return { da: r.da, db: r.db, wB: kinWord(r.da, r.db, Y.sex, r.common.length, r.common[0].pa) }; }
+}
+
+const KinshipView = {
+  a: null, b: null,
+  mount(root, id){ this.root = root; if (id) this.a = id; this.render(); },
+  update(){ this.render(); },
+  render(){
+    const root = clear(this.root);
+    const mk = (key, label) => {
+      const box = h('div', { class: 'pf kin-pick' });
+      const cur = this[key] && Store.persons.get(this[key]);
+      box.append(h('label', { class: 'lbl' }, label));
+      if (cur){
+        box.append(h('span', { class: 'chip' }, avatar(cur, 26), h('span', { class: 't' }, fullName(cur) + (cur.birthYear != null ? ' (f. ' + cur.birthYear + ')' : '')), h('button', { type: 'button', 'aria-label': 'Fjern', onclick: () => { this[key] = null; this.render(); } }, ico('x', 14))));
+      } else {
+        const inp = h('input', { class: 'inp', type: 'search', placeholder: 'Søk etter person i registeret', autocomplete: 'off', 'aria-label': label });
+        box.append(inp);
+        autocomplete(inp, q => { const nq = norm(q); if (nq.length < 1) return []; return [...Store.persons.values()].filter(p => norm(fullName(p)).includes(nq) || norm(p.birthName || '').includes(nq)).slice(0, 8).map(p => ({ label: fullName(p), sub: lifeSpan(p), p })); }, it => { this[key] = it.p.id; this.render(); });
+      }
+      return box;
+    };
+    const res = h('div', { class: 'card kin-res' });
+    if (this.a && this.b && Store.persons.has(this.a) && Store.persons.has(this.b)){
+      const r = kinship(this.a, this.b);
+      if (!r) res.append(h('h2', null, 'Ikke i slekt'), h('p', { class: 'muted' }, 'Appen finner ingen forbindelse mellom de to personene via foreldre, partnere eller steforhold som er registrert. Kanskje mangler det en forelder et sted i linjen.'));
+      else {
+        res.append(h('h2', null, r.kind === 'biologisk' ? 'Biologisk slektskap' : r.kind === 'juridisk' ? 'Juridisk slektskap' : r.kind === 'svogerskap' ? 'Svogerskap' : r.kind === 'steg' ? 'Steforhold' : r.kind === 'partner' ? 'Forhold' : 'Slektskap'),
+          h('p', { class: 'kin-main' }, r.text), r.rev ? h('p', { class: 'muted' }, r.rev) : null,
+          r.note ? h('p', { class: 'fnote' }, r.note) : null,
+          r.how && r.how.length ? h('div', { class: 'kin-how' }, h('h3', { class: 'st-h3' }, 'Slik henger det sammen'), r.how.map(t => h('p', null, t))) : null);
+      }
+    } else res.append(h('p', { class: 'muted' }, 'Velg to personer, så viser appen hva slektskapet er.'));
+    const swap = h('button', { class: 'btn ghost sm', type: 'button', onclick: () => { const t = this.a; this.a = this.b; this.b = t; this.render(); } }, 'Bytt om');
+    root.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Slektskap'), h('p', null, 'Velg to personer fra registeret og se hva slektskapet mellom dem er.'))),
+      h('div', { class: 'card' }, h('div', { class: 'kin-grid' }, mk('a', 'Person 1'), mk('b', 'Person 2')), (this.a || this.b) ? h('div', { style: { marginTop: '8px' } }, swap) : null), res);
+  }
+};
+
 /* ====== Bok til utskrift (A4) ====== */
 const BOOK_CSS = "/* Bokside: hvitt A4-ark med faste m\u00e5l, uavhengig av tema. */\n.page{position:relative;width:210mm;height:296.6mm;background:#fff;color:#1c1b19;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:10.5pt;line-height:1.42;overflow:hidden;box-sizing:border-box;padding:16mm 18mm 0 18mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;text-align:left}\n.page *{box-sizing:border-box}\n.pg-body{width:174mm;height:259mm;overflow:hidden;position:relative}\n.pg-foot{position:absolute;left:18mm;right:18mm;bottom:9mm;display:flex;justify-content:space-between;gap:10mm;font:8.5pt/1.2 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;border-top:.3mm solid #d9d5cb;padding-top:2mm}\n.pg-foot span:last-child{font-variant-numeric:tabular-nums}\n.bk-cover{height:259mm;display:flex;flex-direction:column;justify-content:center;gap:8mm;padding-bottom:20mm}\n.bk-cover .rule{width:34mm;height:1.4mm;background:#8a5a3c}\n.bk-cover h1{font:600 44pt/1.02 'Newsreader',Georgia,serif;letter-spacing:-.02em;margin:0;overflow-wrap:anywhere}\n.bk-cover .sub{font:italic 400 17pt/1.3 'Newsreader',Georgia,serif;color:#4c4a45;margin:0}\n.bk-cover .meta{font:9.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin:0}\n.bk-h1{font:600 24pt/1.1 'Newsreader',Georgia,serif;letter-spacing:-.015em;margin:0 0 5mm;padding-bottom:3mm;border-bottom:.5mm solid #8a5a3c}\n.bk-h2{font:600 19pt/1.12 'Newsreader',Georgia,serif;letter-spacing:-.01em;margin:0}\n.bk-sec{font:600 7.5pt/1.2 'Schibsted Grotesk',system-ui,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:#8a5a3c;margin:5mm 0 1.6mm}\n.bk-ph{display:flex;gap:5mm;align-items:center;padding-top:2mm;margin-top:2mm;border-top:.3mm solid #d9d5cb}\n.bk-ph.first{border-top:0;margin-top:0;padding-top:0}\n.bk-ph .av{border:.3mm solid #d9d5cb;background:#efece4;color:#5a5750;box-shadow:none}\n.bk-ph .t{min-width:0}\n.bk-life{font:9.5pt/1.3 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;margin-top:1mm;font-variant-numeric:tabular-nums}\n.bk-facts{display:grid;grid-template-columns:24mm 1fr;gap:1mm 4mm;margin:2mm 0 0}\n.bk-facts dt{font:600 8.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-facts dd{margin:0;overflow-wrap:anywhere}\n.bk-fam{display:grid;grid-template-columns:24mm 1fr;gap:1mm 4mm;margin:1mm 0 0}\n.bk-fam b{font:600 8.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-fam div{overflow-wrap:anywhere}\n.pref{display:inline-block;margin-left:.3em;min-width:3.6em;font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;white-space:nowrap}\n.bk-ev{display:grid;grid-template-columns:13mm 1fr;gap:.6mm 3mm;margin:0}\n.bk-ev .y{font:600 9pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;text-align:right;font-variant-numeric:tabular-nums}\n.bk-ev .s{font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-p{margin:0 0 2.4mm;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left}\n.bk-srcrefs{font:9pt/1.45 'Schibsted Grotesk',system-ui,sans-serif;color:#3d3b36;margin:0}\n.bk-srcrefs span.k{display:inline-block;min-width:6mm;font-weight:600;color:#8a5a3c}\n.bk-toc{display:grid;grid-template-columns:1fr auto;gap:2.4mm 6mm;margin-top:4mm;font-size:12pt}\n.bk-toc .n{font:600 10pt 'Schibsted Grotesk',system-ui,sans-serif;font-variant-numeric:tabular-nums;text-align:right;color:#5a5750}\n.bk-toc .d{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;display:block;margin-top:.4mm}\n.bk-fig{margin:0;min-width:0}\n.bk-figs{display:grid;grid-template-columns:1fr 1fr;gap:6mm;margin:0 0 5mm}\n.bk-figs .box{height:70mm;display:grid;place-items:center;background:#f3f1ec;border:.3mm solid #e1ddd3;overflow:hidden}\n.bk-figs img{max-width:100%;max-height:100%;display:block;object-fit:contain}\n.bk-figs figcaption{font:8.8pt/1.35 'Schibsted Grotesk',system-ui,sans-serif;color:#3d3b36;margin-top:1.4mm;height:12mm;overflow:hidden}\n.bk-figs figcaption b{font-weight:600}\n.bk-src{margin:0 0 6mm;break-inside:avoid}\n.bk-src .hd{display:flex;gap:3mm;align-items:baseline;margin-bottom:1.4mm}\n.bk-src .hd .k{font:600 12pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c}\n.bk-src .hd .t{font:600 11pt 'Newsreader',Georgia,serif}\n.bk-src .who{font:9pt/1.4 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;margin:0 0 2mm}\n.bk-src .img{display:grid;place-items:center;background:#f3f1ec;border:.3mm solid #e1ddd3;overflow:hidden}\n.bk-src .img img{max-width:100%;max-height:100%;display:block;object-fit:contain}\n.bk-tbl{width:100%;border-collapse:collapse;font-size:10pt}\n.bk-tbl th{font:600 8pt 'Schibsted Grotesk',system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#77746c;text-align:left;padding:0 2mm 1.4mm 0;border-bottom:.3mm solid #cfcabc}\n.bk-tbl td{padding:1.1mm 2mm 1.1mm 0;border-bottom:.2mm solid #ece9e1;vertical-align:top}\n.bk-tbl td.n{width:11mm;font:600 9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;font-variant-numeric:tabular-nums}\n.bk-tbl td.s{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750}\n.bk-gen{font:600 9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;margin:3mm 0 1.6mm}\n.bk-desc{margin:0;font-size:10pt;line-height:1.38}\n.bk-desc div{padding-left:calc(var(--d,0)*5mm);text-indent:-3mm;margin-left:3mm;overflow-wrap:anywhere}\n.bk-desc small{font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-reg{columns:2;column-gap:8mm;font-size:10pt;line-height:1.35;margin:0}\n.bk-reg div{break-inside:avoid;display:flex;justify-content:space-between;gap:3mm;padding:.35mm 0;border-bottom:.2mm dotted #d9d5cb}\n.bk-reg .p{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;white-space:nowrap}\n.bk-svg{display:block;width:174mm;margin:0}\n.bk-note{font:8.8pt/1.4 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin:2mm 0 0}\n";
 const MMPX = 96 / 25.4;
@@ -3135,8 +3263,8 @@ const BookView = {
 /* ====== Appskall ====== */
 const App = {
   view: 'register', arg: null, cur: null,
-  views: { register: RegisterView, person: PersonView, tree: TreeView, map: MapView, photos: Photos, ancestors: AncestorsView, descendants: DescendantsView, book: BookView, stats: StatsView },
-  tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
+  views: { register: RegisterView, person: PersonView, tree: TreeView, map: MapView, photos: Photos, ancestors: AncestorsView, descendants: DescendantsView, book: BookView, stats: StatsView, kinship: KinshipView },
+  tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
     this.main = document.getElementById('main');
@@ -3151,7 +3279,7 @@ const App = {
     let v = 'register', a = null;
     try {
       const hs = (location.hash || '').replace('#', '');
-      if (hs === 'tre') v = 'tree'; else if (hs === 'kart') v = 'map'; else if (hs === 'bilder') v = 'photos'; else if (hs === 'bok') v = 'book'; else if (hs === 'statistikk') v = 'stats';
+      if (hs === 'tre') v = 'tree'; else if (hs === 'kart') v = 'map'; else if (hs === 'bilder') v = 'photos'; else if (hs === 'bok') v = 'book'; else if (hs === 'statistikk') v = 'stats'; else if (hs === 'slektskap') v = 'kinship';
       else if (hs.startsWith('aner-')){ v = 'ancestors'; a = hs.slice(5); } else if (hs.startsWith('etterkommere-')){ v = 'descendants'; a = hs.slice(13); }
       else if (hs.startsWith('p-')){ v = 'person'; a = hs.slice(2); }
     } catch (_) {}
