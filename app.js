@@ -3182,50 +3182,77 @@ const PlaceView = {
   }
 };
 
-/* ---------- Verifisering ---------- */
-const VFACTS = [['birth', 'Fødsel'], ['death', 'Død'], ['parents', 'Foreldre'], ['partners', 'Partnere og barn']];
+/* ---------- Verifisering ----------
+   Fødsel og død hører til personen. Hvert foreldreforhold lagres én gang, på barnet (verify['par:<forelderId>']).
+   Hvert partnerforhold lagres én gang, på personen med lavest id (verify['partner:<annenId>']).
+   Begge sider leser samme post, så verifiseringen vises på begge personsidene. */
 const V_LABEL = { ok: 'Bekreftet', doubt: 'Usikker', '': 'Ikke bekreftet' };
-const vFacts = p => VFACTS.filter(([k]) => k !== 'death' || isDead(p));
-const vState = (p, k) => (p.verify && p.verify[k] && p.verify[k].st) || '';
+const PAR_FIELDS = [['fatherId', 'Far'], ['motherId', 'Mor'], ['coParentId', 'Medforelder'], ['donorId', 'Donor'], ['bioFatherId', 'Biologisk far'], ['bioMotherId', 'Biologisk mor']];
+function vItems(p){
+  const out = [];
+  out.push({ grp: 'Opplysninger', label: 'Fødsel', owner: p.id, key: 'birth' });
+  if (isDead(p)) out.push({ grp: 'Opplysninger', label: 'Død', owner: p.id, key: 'death' });
+  const seen = new Set();
+  PAR_FIELDS.forEach(([f, role]) => { const q = p[f] && Store.persons.get(p[f]); if (!q || seen.has(q.id)) return; seen.add(q.id); out.push({ grp: 'Foreldre', label: role + ': ' + fullName(q), owner: p.id, key: 'par:' + q.id }); });
+  Idx.partnersOf(p.id).filter(x => relKind(x) !== 'foreldre').forEach(x => {
+    const own = p.id < x.p.id ? p.id : x.p.id;
+    out.push({ grp: 'Partnere', label: 'Forholdet til ' + fullName(x.p) + (x.kind === 'gift' ? ' (gift' + (x.year != null ? ' ' + x.year : '') + ')' : x.kind === 'samboer' ? ' (samboer)' : ''), owner: own, key: 'partner:' + (own === p.id ? x.p.id : p.id) });
+  });
+  const kids = new Map(); Idx.kidsOf(p.id).forEach(c => kids.set(c.id, c)); (Idx.donorKids.get(p.id) || []).forEach(i => { const c = Store.persons.get(i); if (c) kids.set(i, c); });
+  [...kids.values()].filter(c => PAR_FIELDS.some(([f]) => c[f] === p.id)).sort((a, b) => (a.birthYear || 9999) - (b.birthYear || 9999)).forEach(c => out.push({ grp: 'Barn', label: 'Barn: ' + fullName(c), owner: c.id, key: 'par:' + p.id }));
+  return out.filter(it => Store.persons.has(it.owner));
+}
+const vRec = it => { const o = Store.persons.get(it.owner); return (o && o.verify && o.verify[it.key]) || {}; };
+const vSt = it => vRec(it).st || '';
+const vUid = it => it.owner + '|' + it.key;
 const srcLabel = ph => [ph.srcType || 'Kilde', ph.ref || ph.caption, ph.year].filter(Boolean).join(' · ');
 const allSources = () => [...Store.photos.values()].filter(isSource).sort((a, b) => srcLabel(a).localeCompare(srcLabel(b), 'nb'));
 
 function openVerify(pid){
   const p0 = Store.persons.get(pid); if (!p0) return;
   const srcs = allSources();
+  const items = vItems(p0);
   const st = {};
-  vFacts(p0).forEach(([k]) => { const v = (p0.verify && p0.verify[k]) || {}; st[k] = { st: v.st || '', src: new Set(v.src || []), note: v.note || '' }; });
+  items.forEach(it => { const v = vRec(it); st[vUid(it)] = { st: v.st || '', src: new Set(v.src || []), note: v.note || '' }; });
   const body = h('form', { class: 'modal-b', novalidate: true, onsubmit: async e => {
     e.preventDefault();
-    const q = clone(Store.persons.get(pid)); q.verify = {};
-    vFacts(q).forEach(([k]) => { const s = st[k]; if (s.st || s.note.trim() || s.src.size) q.verify[k] = { st: s.st || 'doubt', src: [...s.src], note: s.note.trim(), at: new Date().toISOString().slice(0, 10) }; if (q.verify[k] && !s.st) q.verify[k].st = s.st; });
-    Object.keys(q.verify).forEach(k => { if (!q.verify[k].st && !q.verify[k].src.length && !q.verify[k].note) delete q.verify[k]; });
-    if (!Object.keys(q.verify).length) delete q.verify;
-    await Store.savePerson(q); modal.close(); toast('Verifiseringen er lagret');
+    const byOwner = new Map();
+    items.forEach(it => {
+      if (!byOwner.has(it.owner)) { const q = clone(Store.persons.get(it.owner)); q.verify = q.verify || {}; delete q.verify.parents; delete q.verify.partners; byOwner.set(it.owner, q); }
+      const q = byOwner.get(it.owner), s = st[vUid(it)];
+      if (s.st || s.note.trim() || s.src.size) q.verify[it.key] = { st: s.st, src: [...s.src], note: s.note.trim(), at: new Date().toISOString().slice(0, 10) }; else delete q.verify[it.key];
+    });
+    for (const q of byOwner.values()){ if (!Object.keys(q.verify).length) delete q.verify; await Store.savePerson(q); }
+    modal.close(); toast('Verifiseringen er lagret');
   } });
-  body.appendChild(h('p', { class: 'faint', style: { fontSize: '13.5px', margin: '0 0 6px' } }, 'Marker hva du har kontrollert mot en kilde. Det du ikke har sjekket, står som «Ikke bekreftet».'));
-  vFacts(p0).forEach(([k, label]) => {
-    const s = st[k];
-    const sel = h('select', { class: 'inp', 'aria-label': label, onchange: e => { s.st = e.target.value; } }, [['', 'Ikke bekreftet'], ['ok', 'Bekreftet i kilde'], ['doubt', 'Usikker']].map(([v, t]) => h('option', { value: v, selected: s.st === v }, t)));
+  body.appendChild(h('p', { class: 'faint', style: { fontSize: '13.5px', margin: '0 0 6px' } }, 'Marker hva du har kontrollert mot en kilde. Foreldre- og partnerforhold gjelder begge personene og vises også på den andres side.'));
+  let lastGrp = null;
+  items.forEach(it => {
+    const s = st[vUid(it)];
+    if (it.grp !== lastGrp){ lastGrp = it.grp; body.appendChild(h('h3', { class: 'v-grp' }, it.grp)); }
+    const sel = h('select', { class: 'inp', 'aria-label': it.label, onchange: e => { s.st = e.target.value; } }, [['', 'Ikke bekreftet'], ['ok', 'Bekreftet i kilde'], ['doubt', 'Usikker']].map(([v, t]) => h('option', { value: v, selected: s.st === v }, t)));
     const srcBox = srcs.length ? h('details', { class: 'v-src' }, h('summary', null, 'Kilder (' + s.src.size + ')'),
-      h('div', { class: 'v-srclist' }, srcs.map(ph => h('label', { class: 'bk-chk' }, h('input', { type: 'checkbox', checked: s.src.has(ph.id), onchange: e => { if (e.target.checked) s.src.add(ph.id); else s.src.delete(ph.id); const sm = srcBox.querySelector('summary'); if (sm) sm.textContent = 'Kilder (' + s.src.size + ')'; } }), h('span', null, srcLabel(ph)))))) : h('p', { class: 'faint', style: { fontSize: '13px', margin: 0 } }, 'Ingen kilder er lagt inn ennå (under Bilder, fanen Kilder).');
-    body.appendChild(h('div', { class: 'fs' }, h('h3', null, label), sel, srcBox, h('input', { class: 'inp', type: 'text', placeholder: 'Notat, f.eks. «kirkebok Voss 1872, s. 14»', value: s.note, 'aria-label': 'Notat for ' + label, oninput: e => { s.note = e.target.value; } })));
+      h('div', { class: 'v-srclist' }, srcs.map(ph => h('label', { class: 'bk-chk' }, h('input', { type: 'checkbox', checked: s.src.has(ph.id), onchange: e => { if (e.target.checked) s.src.add(ph.id); else s.src.delete(ph.id); const sm = srcBox.querySelector('summary'); if (sm) sm.textContent = 'Kilder (' + s.src.size + ')'; } }), h('span', null, srcLabel(ph)))))) : null;
+    body.appendChild(h('div', { class: 'fs' }, h('h3', null, it.label), sel, srcBox, h('input', { class: 'inp', type: 'text', placeholder: 'Notat, f.eks. «kirkebok Voss 1872, s. 14»', value: s.note, 'aria-label': 'Notat for ' + it.label, oninput: e => { s.note = e.target.value; } })));
   });
   body.appendChild(h('div', { class: 'form-actions' }, h('span'), h('div', { style: { display: 'flex', gap: '8px' } }, h('button', { type: 'button', class: 'btn ghost', onclick: () => modal.close() }, 'Avbryt'), h('button', { type: 'submit', class: 'btn primary' }, 'Lagre'))));
   const modal = openModal('Verifiser ' + fullName(p0), body, {});
 }
 
 function verifyCard(p, edit){
-  const facts = vFacts(p);
-  const ok = facts.filter(([k]) => vState(p, k) === 'ok').length;
-  const rows = facts.map(([k, label]) => {
-    const v = (p.verify && p.verify[k]) || {};
+  const items = vItems(p);
+  const ok = items.filter(it => vSt(it) === 'ok').length;
+  const mk = it => {
+    const v = vRec(it);
     const srcs = (v.src || []).map(id => Store.photos.get(id)).filter(Boolean);
-    return h('div', { class: 'v-row' }, h('span', { class: 'v-l' }, label), h('span', { class: 'vbadge v-' + (v.st || 'none') }, (v.st === 'ok' ? '✓ ' : v.st === 'doubt' ? '? ' : '') + V_LABEL[v.st || '']),
+    return h('div', { class: 'v-row' }, h('span', { class: 'v-l' }, it.label), h('span', { class: 'vbadge v-' + (v.st || 'none') }, (v.st === 'ok' ? '✓ ' : v.st === 'doubt' ? '? ' : '') + V_LABEL[v.st || '']),
       srcs.length || v.note ? h('div', { class: 'v-d' }, srcs.map(ph => h('a', { href: '#', class: 'chip', onclick: e => { e.preventDefault(); Photos.open(ph.id, { list: srcs.map(x => x.id) }); } }, h('span', { class: 't' }, srcLabel(ph)))), v.note ? h('span', { class: 'faint' }, v.note) : null) : null);
-  });
+  };
+  const kids = [];
+  let last = null;
+  items.forEach(it => { if (it.grp !== last){ last = it.grp; kids.push(h('h3', { class: 'v-grp' }, it.grp)); } kids.push(mk(it)); });
   return h('section', { class: 'card' }, h('h2', null, 'Verifisering', edit ? h('button', { class: 'btn sm', onclick: () => openVerify(p.id) }, 'Verifiser') : null),
-    h('p', { class: 'muted', style: { margin: '0 0 6px' } }, ok + ' av ' + facts.length + ' opplysninger er bekreftet i kilde.'), rows);
+    h('p', { class: 'muted', style: { margin: '0 0 6px' } }, ok + ' av ' + items.length + ' er bekreftet i kilde.'), kids);
 }
 
 /* ---------- Kvalitetssjekk ---------- */
@@ -3278,10 +3305,11 @@ function runChecks(){
     const hasSrc = (Idx.photosOf.get(p.id) || []).some(x => isSource(x.photo));
     if (isDead(p) && !deathCatOf(p)) push('dodsarsak', 'ubekreftet', p, 'Dødsårsak er ikke bekreftet (velg gruppen «Ukjent» hvis den ikke er kjent).');
     if (!hasSrc) push('mangler-kilde', 'mangler', p, 'Ingen kilde er knyttet til personen.');
-    const unv = vFacts(p).filter(([k]) => vState(p, k) !== 'ok').map(([, l]) => l.toLowerCase());
-    const dbt = vFacts(p).filter(([k]) => vState(p, k) === 'doubt').map(([, l]) => l.toLowerCase());
-    if (dbt.length) push('usikker', 'ubekreftet', p, 'Merket som usikker: ' + dbt.join(', ') + '.');
-    if (unv.length > dbt.length) push('ubekreftet', 'ubekreftet', p, 'Ikke bekreftet i kilde: ' + vFacts(p).filter(([k]) => !vState(p, k)).map(([, l]) => l.toLowerCase()).join(', ') + '.');
+    const vi = vItems(p), low = t => t.charAt(0).toLowerCase() + t.slice(1);
+    const dbt = vi.filter(it => vSt(it) === 'doubt').map(it => low(it.label));
+    const unv = vi.filter(it => !vSt(it)).map(it => low(it.label));
+    if (dbt.length) push('usikker', 'ubekreftet', p, 'Merket som usikker: ' + dbt.join('; ') + '.');
+    if (unv.length) push('ubekreftet', 'ubekreftet', p, 'Ikke bekreftet i kilde: ' + unv.join('; ') + '.');
   });
   // bilder: tagget før fødsel
   Store.photos.forEach(ph => { if (ph.year == null || isSource(ph)) return; (ph.tags || []).forEach(t => { const p = Store.persons.get(t.pid); if (!p) return; if (p.birthYear != null && ph.year < p.birthYear) out.push({ code: 'bilde-for-fodsel', sev: 'feil', pid: p.id, other: ph.id, msg: 'Er tagget på et bilde fra ' + yearLabel(ph) + ', før fødselsåret (' + p.birthYear + ').', key: 'bilde-for-fodsel:' + ph.id }); else if (p.deathYear != null && ph.year > p.deathYear + 1) out.push({ code: 'bilde-etter-dod', sev: 'advarsel', pid: p.id, other: ph.id, msg: 'Er tagget på et bilde fra ' + yearLabel(ph) + ', etter dødsåret (' + p.deathYear + ').', key: 'bilde-etter-dod:' + ph.id }); }); });
@@ -3310,9 +3338,10 @@ const QualityView = {
     const live = all.filter(x => !ign(x)), ignored = all.filter(ign);
     const count = s => live.filter(x => x.sev === s).length;
     // verifisering: oppsummering
-    const tot = [...Store.persons.values()].reduce((a, p) => { const f = vFacts(p); a.t += f.length; a.ok += f.filter(([k]) => vState(p, k) === 'ok').length; return a; }, { t: 0, ok: 0 });
+    const tot = { t: 0, ok: 0 }, seenV = new Set();
+    Store.persons.forEach(p => vItems(p).forEach(it => { const u = vUid(it); if (seenV.has(u)) return; seenV.add(u); tot.t++; if (vSt(it) === 'ok') tot.ok++; }));
     root.appendChild(h('section', { class: 'card' }, h('div', { class: 'q-chips' }, Q_SEV.map(([k, t, sub]) => h('button', { type: 'button', class: 'q-chip q-' + k, 'aria-pressed': String(this.show.has(k)), onclick: () => { if (this.show.has(k)) this.show.delete(k); else this.show.add(k); this.render(); } }, h('b', null, String(count(k))), h('span', null, t), h('small', null, sub)))),
-      h('p', { class: 'fnote' }, 'Verifisering: ' + tot.ok + ' av ' + tot.t + ' opplysninger er bekreftet i kilde (' + (tot.t ? Math.round(tot.ok / tot.t * 100) : 0) + ' %). Du verifiserer på hver persons side. '),
+      h('p', { class: 'fnote' }, 'Verifisering: ' + tot.ok + ' av ' + tot.t + ' opplysninger og forhold er bekreftet i kilde (' + (tot.t ? Math.round(tot.ok / tot.t * 100) : 0) + ' %). Du verifiserer på hver persons side. '),
       ignored.length ? h('label', { class: 'bk-chk' }, h('input', { type: 'checkbox', checked: this.showIgnored, onchange: e => { this.showIgnored = e.target.checked; this.render(); } }), h('span', null, 'Vis ' + ignored.length + ' ignorerte')) : null));
     const list = (this.showIgnored ? all : live);
     Q_SEV.forEach(([k, t]) => {
@@ -3835,7 +3864,7 @@ const App = {
   tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', places: 'register', place: 'register', quality: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
-    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '25.10 11:36')); } catch (_) {}
+    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '25.10 11:56')); } catch (_) {}
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
