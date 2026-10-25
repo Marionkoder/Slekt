@@ -529,6 +529,17 @@ const DEATH_CATS = ['Alderdom','Infeksjonssykdom','Hjerte- og karsykdom','Kreft'
 const deathCatOf = p => { if (p.deathCat) return p.deathCat; const t = (p.deathCause || '').trim().toLowerCase(); return DEATH_CATS.find(x => x.toLowerCase() === t) || ''; };
 const deathSpecOf = p => { const t = (p.deathCause || '').trim(); return t && t.toLowerCase() !== (deathCatOf(p) || '').toLowerCase() ? t : ''; };
 
+const NO_NAMES = {"Afghanistan": "Afghanistan", "Albania": "Albania", "Algeria": "Algerie", "American Samoa": "Amerikansk Samoa", "Andorra": "Andorra", "Angola": "Angola", "Anguilla": "Anguilla", "Antigua and Barbuda": "Antigua og Barbuda", "Antigua and Barb.": "Antigua og Barbuda", "Argentina": "Argentina", "Armenia": "Armenia", "Aruba": "Aruba", "Australia": "Australia", "Austria": "Østerrike", "Azerbaijan": "Aserbajdsjan", "Bahamas": "Bahamas", "The Bahamas": "Bahamas", "Bahrain": "Bahrain", "Bangladesh": "Bangladesh", "Barbados": "Barbados", "Belarus": "Hviterussland", "Belgium": "Belgia", "Belize": "Belize", "Benin": "Benin", "Bermuda": "Bermuda", "Bhutan": "Bhutan", "Bolivia": "Bolivia", "Bosnia and Herzegovina": "Bosnia-Hercegovina", "Bosnia and Herz.": "Bosnia-Hercegovina", "Botswana": "Botswana", "Brazil": "Brasil", "Brunei": "Brunei", "Bulgaria": "Bulgaria", "Burkina Faso": "Burkina Faso", "Burundi": "Burundi", "Cabo Verde": "Kapp Verde", "Cape Verde": "Kapp Verde", "Cambodia": "Kambodsja", "Cameroon": "Kamerun", "Canada": "Canada", "Cayman Islands": "Caymanøyene", "Central African Republic": "Den sentralafrikanske republikk", "Central African Rep.": "Den sentralafrikanske republikk", "Chad": "Tsjad", "Chile": "Chile", "China": "Kina", "Colombia": "Colombia", "Comoros": "Komorene", "Congo": "Kongo-Brazzaville", "Republic of the Congo": "Kongo-Brazzaville", "Democratic Republic of the Congo": "Kongo-Kinshasa", "Dem. Rep. Congo": "Kongo-Kinshasa", "Cook Islands": "Cookøyene", "Costa Rica": "Costa Rica", "Croatia": "Kroatia", "Cuba": "Cuba", "Curaçao": "Curaçao", "Cyprus": "Kypros", "Czechia": "Tsjekkia", "Czech Republic": "Tsjekkia", "Côte d'Ivoire": "Elfenbenskysten", "Ivory Coast": "Elfenbenskysten", "Denmark": "Danmark", "Djibouti": "Djibouti", "Dominica": "Dominica", "Dominican Republic": "Den dominikanske republikk", "Dominican Rep.": "Den dominikanske republikk", "Ecuador": "Ecuador", "Egypt": "Egypt", "El Salvador": "El Salvador", "Equatorial Guinea": "Ekvatorial-Guinea", "Eq. Guinea": "Ekvatorial-Guinea", "Eritrea": "Eritrea", "Estonia": "Estland", "Ethiopia": "Etiopia", "Faroe Islands": "Færøyene", "Faeroe Is.": "Færøyene", "Falkland Islands": "Falklandsøyene", "Fiji": "Fiji", "Finland": "Finland", "French Polynesia": "Fransk Polynesia", "France": "Frankrike", "Gabon": "Gabon", "Gambia": "Gambia", "The Gambia": "Gambia", "Georgia": "Georgia", "Germany": "Tyskland", "Ghana": "Ghana", "Greece": "Hellas", "Greenland": "Grønland", "Grenada": "Grenada", "Guam": "Guam", "Guatemala": "Guatemala", "Guernsey": "Guernsey", "Guinea": "Guinea", "Guinea-Bissau": "Guinea-Bissau", "Guyana": "Guyana", "Haiti": "Haiti", "Honduras": "Honduras", "Hong Kong": "Hongkong", "Hungary": "Ungarn", "Iceland": "Island", "India": "India", "Indonesia": "Indonesia", "Iran": "Iran", "Iraq": "Irak", "Ireland": "Irland", "Isle of Man": "Man", "Israel": "Israel", "Italy": "Italia", "Jamaica": "Jamaica", "Japan": "Japan", "Jersey": "Jersey", "Jordan": "Jordan", "Kazakhstan": "Kasakhstan", "Kenya": "Kenya", "Kiribati": "Kiribati", "Kosovo": "Kosovo", "Kuwait": "Kuwait", "Kyrgyzstan": "Kirgisistan", "Laos": "Laos", "Latvia": "Latvia", "Lebanon": "Libanon", "Lesotho": "Lesotho", "Liberia": "Liberia", "Libya": "Libya", "Liechtenstein": "Liechtenstein", "Lithuania": "Litauen", "Luxembourg": "Luxembourg", "Macao": "Macao", "Macau": "Macao", "North Macedonia": "Nord-Makedonia", "Macedonia": "Nord-Makedonia", "Madagascar": "Madagaskar", "Malawi": "Malawi", "Malaysia": "Malaysia", "Maldives": "Maldivene", "Mali": "Mali", "Malta": "Malta", "Marshall Islands": "Marshalløyene", "Mauritania": "Mauritania", "Mauritius": "Mauritius", "Mexico": "Mexico", "Micronesia": "Mikronesia", "Moldova": "Moldova", "Monaco": "Monaco", "Mongolia": "Mongolia", "Montenegro": "Montenegro", "Montserrat": "Montserrat", "Morocco": "Marokko", "Mozambique": "Mosambik", "Myanmar": "Myanmar", "Burma": "Myanmar", "Namibia": "Namibia", "Nauru": "Nauru", "Nepal": "Nepal", "Netherlands": "Nederland", "The Netherlands": "Nederland", "Holland": "Nederland", "New Caledonia": "Ny-Caledonia", "New Zealand": "New Zealand", "Nicaragua": "Nicaragua", "Niger": "Niger", "Nigeria": "Nigeria", "Niue": "Niue", "North Korea": "Nord-Korea", "Norway": "Norge", "Oman": "Oman", "Pakistan": "Pakistan", "Palau": "Palau", "Palestine": "Palestina", "Panama": "Panama", "Papua New Guinea": "Papua Ny-Guinea", "Paraguay": "Paraguay", "Peru": "Peru", "Philippines": "Filippinene", "Pitcairn Islands": "Pitcairnøyene", "Poland": "Polen", "Portugal": "Portugal", "Puerto Rico": "Puerto Rico", "Qatar": "Qatar", "Romania": "Romania", "Russia": "Russland", "Rwanda": "Rwanda", "Saint Helena": "St. Helena", "Saint Lucia": "St. Lucia", "Saint Kitts and Nevis": "St. Kitts og Nevis", "Saint Vincent and the Grenadines": "St. Vincent og Grenadinene", "Samoa": "Samoa", "San Marino": "San Marino", "Saudi Arabia": "Saudi-Arabia", "Senegal": "Senegal", "Serbia": "Serbia", "Seychelles": "Seychellene", "Sierra Leone": "Sierra Leone", "Singapore": "Singapore", "Sint Maarten": "Sint Maarten", "Slovakia": "Slovakia", "Slovenia": "Slovenia", "Solomon Islands": "Salomonøyene", "Somalia": "Somalia", "South Africa": "Sør-Afrika", "South Korea": "Sør-Korea", "South Sudan": "Sør-Sudan", "Spain": "Spania", "Sri Lanka": "Sri Lanka", "Sudan": "Sudan", "Suriname": "Surinam", "Sweden": "Sverige", "Switzerland": "Sveits", "Syria": "Syria", "São Tomé and Príncipe": "São Tomé og Príncipe", "Sao Tome and Principe": "São Tomé og Príncipe", "Taiwan": "Taiwan", "Tajikistan": "Tadsjikistan", "Tanzania": "Tanzania", "Thailand": "Thailand", "Timor-Leste": "Øst-Timor", "East Timor": "Øst-Timor", "Togo": "Togo", "Tonga": "Tonga", "Trinidad and Tobago": "Trinidad og Tobago", "Tunisia": "Tunisia", "Turkey": "Tyrkia", "Türkiye": "Tyrkia", "Turkmenistan": "Turkmenistan", "Tuvalu": "Tuvalu", "Uganda": "Uganda", "Ukraine": "Ukraina", "United Arab Emirates": "De forente arabiske emirater", "United Kingdom": "Storbritannia", "UK": "Storbritannia", "Great Britain": "Storbritannia", "England": "England", "Scotland": "Skottland", "Wales": "Wales", "Northern Ireland": "Nord-Irland", "United States": "USA", "United States of America": "USA", "Uruguay": "Uruguay", "Uzbekistan": "Usbekistan", "Vanuatu": "Vanuatu", "Vatican": "Vatikanstaten", "Vatican City": "Vatikanstaten", "Venezuela": "Venezuela", "Vietnam": "Vietnam", "Western Sahara": "Vest-Sahara", "Yemen": "Jemen", "Zambia": "Zambia", "Zimbabwe": "Zimbabwe", "Eswatini": "Eswatini", "Swaziland": "Eswatini", "Åland": "Åland", "Åland Islands": "Åland", "Gibraltar": "Gibraltar", "Svalbard": "Svalbard", "Yugoslavia": "Jugoslavia", "Soviet Union": "Sovjetunionen", "USSR": "Sovjetunionen", "Prussia": "Preussen", "Copenhagen": "København", "Gothenburg": "Göteborg", "Rome": "Roma", "Venice": "Venezia", "Florence": "Firenze", "Naples": "Napoli", "Milan": "Milano", "Athens": "Aten", "Moscow": "Moskva", "Warsaw": "Warszawa", "Prague": "Praha", "Vienna": "Wien", "Lisbon": "Lisboa", "Brussels": "Brussel", "Cologne": "Köln", "Munich": "München", "Geneva": "Genève", "Helsinki": "Helsingfors", "Saint Petersburg": "St. Petersburg", "Edinburgh": "Edinburgh", "New York City": "New York", "Turin": "Torino", "Seville": "Sevilla", "Antwerp": "Antwerpen", "The Hague": "Haag", "Zurich": "Zürich", "Belgrade": "Beograd", "Bucharest": "București", "Kyiv": "Kyiv", "Kiev": "Kyiv", "Peking": "Beijing", "Cairo": "Kairo", "Jerusalem": "Jerusalem", "Constantinople": "Konstantinopel", "Istanbul": "Istanbul", "Danzig": "Danzig"};
+const _noMap = new Map(Object.entries(NO_NAMES).map(([k, v]) => [k.toLowerCase(), v]));
+// Oversetter engelske land- og stedsnavn til norsk, del for del (komma/skråstrek)
+const noPlace = s => (s == null ? s : String(s).split(/(\s*[,/]\s*)/).map(t => { const k = t.trim().toLowerCase(); const v = _noMap.get(k); return v ? t.replace(t.trim(), v) : t; }).join(''));
+
+// «på» for sykehus, institusjoner og gårder, ellers «i»
+const iPaa = pl => (pl && (pl.farm || /(syke|sjuke)(hus|heim|hjem)|hospital|lasarett|klinikk|fødestue|fødeavdeling|fødehjem|fødeklinikk|institusjon|omsorgssenter|aldershjem|barnehjem/i.test(pl.name || ''))) ? 'på' : 'i';
+
+// Fornavn med store bokstaver, resten (mellomnavn, patronym, etternavn) med vanlig skrift
+const nameFirstCaps = x => { const g = (x.given || '').trim().split(/\s+/).filter(Boolean); const first = g.shift() || ''; const rest = [g.join(' '), x.patronym, x.family].filter(Boolean).join(' '); if (!first) return fullName(x); const pat = (x.patronym && (x.birthYear == null || x.birthYear < 1900)); return h('span', null, h('b', { class: 'gn' }, first.toUpperCase()), rest ? ' ' + (pat ? rest : [g.join(' '), x.family].filter(Boolean).join(' ')) : ''); };
+
 /* ====== Lokal lagring (GitHub-versjonen), sikkerhetskopi og gjenoppretting ====== */
 const URLS = new Map();   // assetId -> blob-adresse (kun lokal modus)
 
@@ -962,7 +973,7 @@ function openPlacePicker(cur, cb, o = {}){
       } else {
         const r = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&addressdetails=1&accept-language=nb&q=' + encodeURIComponent(q));
         const j = await r.json();
-        items = j.map(n => ({ name: (n.name || n.display_name.split(',')[0]), type: n.type, where: n.display_name.split(',').slice(1, 4).join(',').trim(), lat: +n.lat, lon: +n.lon }));
+        items = j.map(n => ({ name: noPlace(n.name || n.display_name.split(',')[0]), type: n.type, where: noPlace(n.display_name.split(',').slice(1, 4).join(',').trim()), lat: +n.lat, lon: +n.lon }));
       }
     } catch (e){ console.error(e); clear(sugList); sugList.append(h('div', { class: 'faint' }, 'Fikk ikke kontakt med søketjenesten. Du kan fortsatt trykke i kartet.')); sugBtn.disabled = false; return; }
     sugBtn.disabled = false; clear(sugList);
@@ -991,7 +1002,7 @@ function openPlacePicker(cur, cb, o = {}){
   });
 }
 
-const pn = pl => pl.name + (pl.now ? ' (nå ' + pl.now + ')' : '');
+const pn = pl => noPlace(pl.name) + (pl.now ? ' (nå ' + pl.now + ')' : '');
 function placeField(initial, onChange, o = {}){
   let v = initial ? clone(initial) : { name: '', lat: null, lon: null };
   if (v.kom === undefined && v.name && v.farm === undefined) v._kom0 = v.name;
@@ -1004,7 +1015,7 @@ function placeField(initial, onChange, o = {}){
   const nowEl = h('div', { class: 'faint pf-now' });
   wrap.append(W(komInp), nowEl, W(farmInp), W(regInp), st);
   const compose = () => {
-    v.kom = komInp.value.trim(); v.farm = farmInp.value.trim(); v.region = regInp.value.trim();
+    v.kom = noPlace(komInp.value.trim()); v.farm = farmInp.value.trim(); v.region = noPlace(regInp.value.trim());
     v.name = [v.farm, v.kom, v.region].filter(Boolean).join(', ');
     ['kom', 'farm', 'region', 'now'].forEach(k => { if (!v[k]) delete v[k]; });
     delete v._kom0;
@@ -1025,6 +1036,7 @@ function placeField(initial, onChange, o = {}){
   const upd = () => { compose(); onChange(out()); };
   komInp.addEventListener('input', () => { v.now = ''; upd(); });
   farmInp.addEventListener('input', upd); regInp.addEventListener('input', upd);
+  [komInp, regInp].forEach(i => i.addEventListener('blur', () => { const t = noPlace(i.value); if (t !== i.value){ i.value = t; upd(); } }));
   autocomplete(komInp, q => searchPlaces(q, 8), it => {
     const pl = it.place;
     komInp.value = pl.kom || pl.name;
@@ -1089,6 +1101,17 @@ function pickPerson(opts){
   ex.add(ref.id);
   const rel = ref.id && Store.persons.has(ref.id) ? relatedSets(ref.id) : { anc: new Set(), desc: new Set() };
   if (role === 'father' || role === 'mother' || role === 'coparent' || role === 'donor') rel.desc.forEach(i => ex.add(i));
+  if ((role === 'father' || role === 'mother' || role === 'coparent') && ref.parents){
+    // den andre forelderen kan ikke være nær slekt av en forelder som allerede er kjent
+    const par = q => q ? [q.fatherId, q.motherId, q.coParentId, q.donorId].filter(Boolean) : [];
+    const slot = { father: 0, mother: 1, coparent: 2 }[role];
+    ref.parents().filter((x, i) => x && i !== slot).forEach(kid => {
+      const K = Store.persons.get(kid); if (!K) return;
+      const ps = par(K); ps.forEach(i => ex.add(i));
+      ps.forEach(pid => { const P = Store.persons.get(pid); if (!P) return; par(P).forEach(i => ex.add(i)); Idx.siblingsOf(P).forEach(x => ex.add(x.id)); });
+      Idx.siblingsOf(K).forEach(x => ex.add(x.id));
+    });
+  }
   if (role === 'child') rel.anc.forEach(i => ex.add(i));
   if (role === 'partner'){ rel.anc.forEach(i => ex.add(i)); rel.desc.forEach(i => ex.add(i)); const me = Store.persons.get(ref.id); if (me) Idx.siblingsOf(me).forEach(x => ex.add(x.id)); }
   if (role === 'sibling'){ rel.anc.forEach(i => ex.add(i)); rel.desc.forEach(i => ex.add(i)); }
@@ -1178,7 +1201,7 @@ function openPersonForm(opts = {}){
   const yearInp = (key, ph) => h('input', { class: 'inp', type: 'number', inputmode: 'numeric', min: 0, max: 2100, placeholder: ph || 'År', value: f[key] != null ? f[key] : '', oninput: e => f[key] = intOrNull(e.target.value) });
   const textInp = (key, ph) => h('input', { class: 'inp', type: 'text', placeholder: ph, value: f[key] || '', oninput: e => f[key] = e.target.value });
 
-  const selfRef = () => ({ id: f.id, birthYear: f.birthYear, deathYear: f.deathYear, sex: f.sex });
+  const selfRef = () => ({ id: f.id, birthYear: f.birthYear, deathYear: f.deathYear, sex: f.sex, parents: () => [f.fatherId, f.motherId, f.coParentId, f.donorId] });
   const PF = { father: ['Far', 'fatherId'], mother: ['Mor', 'motherId'], coparent: ['Medforelder', 'coParentId'], donor: ['Donor', 'donorId'] };
   const parentField = role => personField({ role, label: PF[role][0], ref: selfRef, value: f[PF[role][1]], empty: 'Ukjent. Velg eller opprett …',
     onChange: v => { f[PF[role][1]] = v; },
@@ -1458,9 +1481,9 @@ const RegisterView = {
     rows.forEach(p => {
       if (this.sort === 'gen'){ const g = this.gm.get(p.id) || 0; if (g !== lastGen){ lastGen = g; if (ul.children.length){ this.body.appendChild(ul); ul = h('ul', { class: 'people' }); } this.body.appendChild(h('h3', { class: 'gen-h' }, 'Generasjon ' + (g + 1))); } }
       const parts = [];
-      if (p.birthPlace && p.birthPlace.name) parts.push('Født i ' + p.birthPlace.name);
+      if (p.birthPlace && p.birthPlace.name) parts.push('Født ' + iPaa(p.birthPlace) + ' ' + noPlace(p.birthPlace.name));
       const last = (p.moves || []).filter(m => m.place && m.place.name).slice(-1)[0];
-      if (last && !isDead(p)) parts.push('bor i ' + last.place.name);
+      if (last && !isDead(p)) parts.push('bor ' + iPaa(last.place) + ' ' + noPlace(last.place.name));
       ul.appendChild(h('li', null, h('button', { class: 'prow', onclick: () => App.go('person', p.id) },
         avatar(p, 46),
         h('div', { class: 'b' }, h('div', { class: 'n' }, fullName(p)), h('div', { class: 's' }, parts.join(' · ') || ' '), siblingText(p) ? h('div', { class: 's' }, siblingText(p)) : null),
@@ -1552,7 +1575,7 @@ const PersonView = {
     const addBtn = (label, fn) => h('button', { class: 'btn sm ghost', onclick: fn }, ico('plus', 14), label);
     const relink = async fn => { const q = clone(Store.persons.get(p.id)); fn(q); await Store.savePerson(q); };
     const setParent = async (child, field, pid) => { const q = clone(Store.persons.get(child)); q[field] = pid; await Store.savePerson(q); };
-    const refOf = { id: p.id, birthYear: p.birthYear, deathYear: p.deathYear, sex: p.sex };
+    const refOf = { id: p.id, birthYear: p.birthYear, deathYear: p.deathYear, sex: p.sex, parents: () => [p.fatherId, p.motherId, p.coParentId, p.donorId] };
     const SLOT = { father: 'fatherId', mother: 'motherId', coparent: 'coParentId', donor: 'donorId' };
     const addParent = role => pickPerson({ role, ref: refOf, exclude: [p.fatherId, p.motherId, p.coParentId, p.donorId, ...partners.map(x => x.p.id)].filter(Boolean),
       onPick: np => relink(q => { q[SLOT[role]] = np.id; }).then(() => toast(fullName(np) + ' er lagt til som ' + ROLE_LABEL[role])),
@@ -1680,13 +1703,14 @@ const TreeView = {
   mount(root, arg){
     this.root = root; this.T = null; this.needFit = false; this.dim = null;
     if (arg && Store.persons.has(arg)){ this.focus = arg; this.sel = arg; this.mode = 'line'; this.refit = true; }
-    const modes = [['all', 'Hele slekten'], ['line', 'Rundt valgt'], ['anc', 'Aner'], ['desc', 'Etterkommere']];
-    this.seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Visning' }, modes.map(([k, t]) => h('button', { type: 'button', 'data-m': k, onclick: () => { this.mode = k; if (k !== 'all' && !Store.persons.has(this.focus)) this.focus = this.defaultFocus(); this.refit = true; this.update(); } }, t)));
+    const modes = [['all', 'Hele slekten'], ['line', 'Rundt valgt'], ['anc', 'Aner'], ['desc', 'Etterkommere'], ['fan', 'Vifte']];
+    this.seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Visning' }, modes.map(([k, t]) => h('button', { type: 'button', 'data-m': k, onclick: () => { this.mode = k; if (k === 'fan'){ if (this.sel && Store.persons.has(this.sel)) this.focus = this.sel; else { let best = null, bn = -1; Store.persons.forEach(q => { const n = relatedSets(q.id).anc.size; if (n > bn){ bn = n; best = q.id; } }); if (best) this.focus = best; } } if (k !== 'all' && !Store.persons.has(this.focus)) this.focus = this.defaultFocus(); this.refit = true; this.update(); } }, t)));
     this.focusSel = h('select', { class: 'inp', style: { width: 'auto', maxWidth: '100%' }, 'aria-label': 'Utgangsperson', onchange: e => { this.focus = e.target.value; this.sel = this.focus; if (this.mode === 'all') this.mode = 'line'; this.refit = true; this.update(); } });
     this.head = h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Slektstre'), this.sub = h('p', null, '')));
     this.openAll = h('button', { type: 'button', class: 'btn sm', onclick: () => { this.cdown.clear(); this.cup.clear(); this.update(); } }, 'Åpne alle grener');
     this.closeAll = h('button', { type: 'button', class: 'btn sm', onclick: () => { this.closeBranches(); } }, 'Lukk grener');
-    this.tools = h('div', { class: 'tools' }, this.seg, this.focusSel, this.openAll, this.closeAll);
+    this.fanGens = h('select', { class: 'inp', style: { width: 'auto' }, 'aria-label': 'Antall generasjoner', onchange: e => { this.gens = +e.target.value; this.update(); } }, [3, 4, 5, 6].map(g => h('option', { value: g, selected: g === (this.gens || 5) }, g + ' generasjoner')));
+    this.tools = h('div', { class: 'tools' }, this.seg, this.focusSel, this.fanGens, this.openAll, this.closeAll);
     this.wrap = h('div', { class: 'treewrap' });
     this.svg = h('svg', { role: 'img', 'aria-label': 'Slektstre' });
     this.gv = h('g');
@@ -1744,6 +1768,15 @@ const TreeView = {
       return;
     }
     this.wrap.style.display = ''; this.tools.style.display = '';
+    const isFan = this.mode === 'fan';
+    this.fanGens.style.display = isFan ? '' : 'none'; this.openAll.style.display = this.closeAll.style.display = isFan ? 'none' : '';
+    if (isFan){
+      this.wrap.style.display = 'none';
+      const fp = Store.persons.get(this.focus);
+      this.sub.textContent = 'Anetavle i full sirkel for ' + fullName(fp) + '. Fars side øverst, mors side nederst. Trykk på en person for å åpne den.';
+      this.empty.appendChild(h('div', { class: 'card fan-card fan-full' }, fanChart(fp, this.gens || 5, { full: true })));
+      return;
+    }
     const key = this.mode + '|' + this.focus;
     if (key !== this._key){ this._key = key; this.cdown.clear(); this.cup.clear(); }
     const full = treeSet(this.mode, this.focus);
@@ -1848,7 +1881,7 @@ const TreeView = {
       const n = Object.assign({ id }, pos.get(id));
       const p = Store.persons.get(id);
       const card = h('div', { class: 'pcard ' + (p.sex === 'm' ? 'm' : p.sex === 'f' ? 'f' : '') + (n.id === this.sel ? ' sel' : ''), role: 'button', tabindex: 0, 'aria-label': fullName(p) },
-        avatar(p, 36), h('div', { class: 'b' }, h('div', { class: 'n' }, fullName(p)), h('div', { class: 'y' }, lifeSpan(p)), siblingText(p) ? h('div', { class: 'sb' }, siblingText(p)) : null));
+        avatar(p, 36), h('div', { class: 'b' }, h('div', { class: 'n' }, nameFirstCaps(p)), h('div', { class: 'y' }, lifeSpan(p)), siblingText(p) ? h('div', { class: 'sb' }, siblingText(p)) : null));
       const act = () => { this.sel = n.id; this.update(); };
       card.addEventListener('click', act);
       card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); act(); } });
@@ -2132,13 +2165,13 @@ const MapView = {
     const [W, H] = base.size, boxes = [];
     [...groups.values()].sort((a, b) => b.list.length - a.list.length).forEach(gr => {
       if (!gr.place.name) return;
-      const txt = gr.place.name + (gr.list.length > 1 ? ' · ' + gr.list.length : '');
+      const txt = noPlace(gr.place.name) + (gr.list.length > 1 ? ' · ' + gr.list.length : '');
       const w = txt.length * 6.7 + 6, hh = 16;
       const x = gr.cx + gr.rad + 3, y = gr.cy - 8;
       if (x < -w || x > W || y < -20 || y > H) return;
       if (boxes.some(b => x < b.x + b.w && x + w > b.x && y < b.y + b.h && y + hh > b.y)) return;
       boxes.push({ x, y, w, h: hh });
-      const lab = h('div', { class: 'plabel' }, gr.place.name, gr.list.length > 1 ? h('b', null, ' · ' + gr.list.length) : null);
+      const lab = h('div', { class: 'plabel' }, noPlace(gr.place.name), gr.list.length > 1 ? h('b', null, ' · ' + gr.list.length) : null);
       lab.style.setProperty('--x', x + 'px'); lab.style.setProperty('--y', y + 'px');
       this.dots.appendChild(lab);
     });
@@ -2172,9 +2205,9 @@ const MapView = {
     clear(this.infoEl).append(
       h('div', { class: 'hd' }, avatar(x.p, 44),
         h('div', { style: { minWidth: 0, flex: 1 } }, h('div', { class: 'nm' }, fullName(x.p)),
-          h('div', { class: 'muted', style: { fontSize: '13px' } }, lifeSpan(x.p) + ' · ' + (loc ? 'bor i ' + (loc.place.name || 'ukjent sted') : Y < x.start ? 'ikke født ennå' : 'ikke på kartet i ' + Y))),
+          h('div', { class: 'muted', style: { fontSize: '13px' } }, lifeSpan(x.p) + ' · ' + (loc ? 'bor ' + iPaa(loc.place) + ' ' + (noPlace(loc.place.name) || 'ukjent sted') : Y < x.start ? 'ikke født ennå' : 'ikke på kartet i ' + Y))),
         h('button', { class: 'icon-btn', style: { width: '32px', height: '32px' }, 'aria-label': 'Lukk', onclick: () => this.deselect() }, ico('x', 16))),
-      stops.length > 1 ? h('div', { class: 'route' }, stops.map(s => s.year + ' ' + (s.place.name || '?')).join('  →  ')) : null,
+      stops.length > 1 ? h('div', { class: 'route' }, stops.map(s => s.year + ' ' + (noPlace(s.place.name) || '?')).join('  →  ')) : null,
       h('div', { class: 'acts' }, h('button', { class: 'btn sm primary', onclick: () => App.go('person', x.p.id) }, 'Åpne side'), h('button', { class: 'btn sm', onclick: () => this.fitAll(true, x.p.id) }, 'Vis ruten')));
   },
   update(){
@@ -2435,7 +2468,7 @@ const Photos = {
         h('img', { src: photoUrl(ph), alt: ph.caption || '', loading: 'lazy', style: ph.w && ph.h ? { aspectRatio: ph.w + '/' + ph.h } : {} }),
         src ? h('span', { class: 'badge top' }, ph.srcType || 'Kilde') : null,
         (ph.tags || []).length ? h('span', { class: 'tg' }, ico('tag', 13), String(ph.tags.length)) : null,
-        h('span', { class: 'cap' }, [yearLabel(ph), ph.place && ph.place.name, (src ? (ph.ref || ph.caption) : ph.caption) || names.slice(0, 3).join(', '), pagesOf(ph).length > 1 ? pagesOf(ph).length + ' sider' : null].filter(Boolean).join(' · ') || ' '));
+        h('span', { class: 'cap' }, [yearLabel(ph), ph.place && noPlace(ph.place.name), (src ? (ph.ref || ph.caption) : ph.caption) || names.slice(0, 3).join(', '), pagesOf(ph).length > 1 ? pagesOf(ph).length + ' sider' : null].filter(Boolean).join(' · ') || ' '));
     })));
   },
   unmount(){},
@@ -2622,7 +2655,7 @@ const Photos = {
 };
 
 /* ====== Aneside og etterkommerside ====== */
-const GEN_UP = ['Deg selv', 'Foreldre', 'Besteforeldre', 'Oldeforeldre', 'Tippoldeforeldre', 'Tipp-tippoldeforeldre'];
+const GEN_UP = ['Hovedperson', 'Foreldre', 'Besteforeldre', 'Oldeforeldre', 'Tippoldeforeldre', 'Tipp-tippoldeforeldre'];
 const GEN_DOWN = ['', 'Barn', 'Barnebarn', 'Oldebarn', 'Tippoldebarn', 'Tipp-tippoldebarn'];
 const genUp = g => GEN_UP[g - 1] || ('Generasjon ' + g + ' bakover');
 const genDown = g => GEN_DOWN[g] || ('Generasjon ' + g + ' framover');
@@ -2632,7 +2665,8 @@ const bookFrom = (patch) => { BookView.load(); Object.assign(BookView.o, patch);
 function fanChart(p, G = 3, o = {}){
   const TH = [0, 76, 82, 88, 94, 100];
   const r = [38]; for (let i = 1; i <= G; i++) r[i] = r[i - 1] + TH[i];
-  const W = 2 * r[G] + 24, Ht = r[G] + 34, cx = W / 2, cy = r[G] + 14;
+  const FULL = !!o.full, SPAN = FULL ? 2 * Math.PI : Math.PI;
+  const W = 2 * r[G] + 24, Ht = FULL ? W : r[G] + 34, cx = W / 2, cy = FULL ? Ht / 2 : r[G] + 14;
   const anc = new Map([[1, p]]);
   (function fill(n){ if (n >= Math.pow(2, G)) return; const x = anc.get(n); if (!x) return; const pr = parentPair(x);
     [[pr[0], 2 * n], [pr[1], 2 * n + 1]].forEach(([pid, nn]) => { const q = pid && Store.persons.get(pid); if (q){ anc.set(nn, q); fill(nn); } }); })(1);
@@ -2642,7 +2676,7 @@ function fanChart(p, G = 3, o = {}){
   const parts = x => { const g = (x.given || '').trim().split(/\s+/).filter(Boolean); const first = g.shift() || ''; return { first: first.toUpperCase(), rest: [g.join(' '), x.patronym, x.family].filter(Boolean).join(' ') }; };
   const svg = h('svg', { class: 'fan', viewBox: '0 0 ' + f1(W) + ' ' + f1(Ht), role: 'group', 'aria-label': 'Anetavle i vifteform for ' + fullName(p) });
   for (let i = G; i >= 1; i--){
-    const n0 = Math.pow(2, i), span = Math.PI / n0, ri = r[i - 1], ro = r[i], thick = ro - ri;
+    const n0 = Math.pow(2, i), span = SPAN / n0, ri = r[i - 1], ro = r[i], thick = ro - ri;
     for (let k = 0; k < n0; k++){
       const n = n0 + k, x = anc.get(n), a0 = Math.PI - k * span, a1 = a0 - span;
       const d = 'M' + pt(ri, a0).map(f1) + 'L' + pt(ro, a0).map(f1) + 'A' + ro + ',' + ro + ' 0 0 1 ' + pt(ro, a1).map(f1) + 'L' + pt(ri, a1).map(f1) + 'A' + ri + ',' + ri + ' 0 0 0 ' + pt(ri, a0).map(f1);
@@ -2654,6 +2688,7 @@ function fanChart(p, G = 3, o = {}){
         const lines = [[trunc(nm.first, 0), 'f']];
         let rot, maxc;
         if (i <= 3){ rot = 90 - th * 180 / Math.PI; maxc = Math.max(8, Math.floor(rm * span * 0.88 / (fs2 * 0.56))); if (i === 1) maxc = Math.min(maxc, 20); } else { rot = -th * 180 / Math.PI; if (Math.cos(th) < 0) rot += 180; maxc = Math.floor((thick - 8) / (fs2 * 0.5)); }
+        if (FULL && i <= 3 && Math.sin(th) < 0) rot += 180;
         const L = [{ t: trunc(nm.first, Math.floor(maxc * 0.85)), cls: 'fn', fs: fs1 }];
         if (nm.rest) L.push({ t: trunc(nm.rest, maxc), cls: 'fr', fs: fs2 });
         if (i <= 3 && lifeSpan(x)) L.push({ t: lifeSpan(x), cls: 'fy', fs: fs2 - .5 });
@@ -2669,9 +2704,9 @@ function fanChart(p, G = 3, o = {}){
     }
   }
   const nm0 = parts(p);
-  svg.appendChild(h('g', { class: 'fan-c' }, h('path', { d: 'M' + pt(r[0], Math.PI).map(f1) + 'A' + r[0] + ',' + r[0] + ' 0 0 1 ' + pt(r[0], 0).map(f1) + 'Z' }),
-    h('text', { class: 'fn', x: f1(cx), y: f1(cy - 17), 'text-anchor': 'middle', 'font-size': 11.5 }, trunc(nm0.first, 11)),
-    h('text', { class: 'fr', x: f1(cx), y: f1(cy - 5), 'text-anchor': 'middle', 'font-size': 9 }, trunc([nm0.rest].join(''), 16))));
+  svg.appendChild(h('g', { class: 'fan-c' }, FULL ? h('circle', { cx: f1(cx), cy: f1(cy), r: r[0] }) : h('path', { d: 'M' + pt(r[0], Math.PI).map(f1) + 'A' + r[0] + ',' + r[0] + ' 0 0 1 ' + pt(r[0], 0).map(f1) + 'Z' }),
+    h('text', { class: 'fn', x: f1(cx), y: f1(FULL ? cy - 4 : cy - 17), 'text-anchor': 'middle', 'font-size': 11.5 }, trunc(nm0.first, 11)),
+    h('text', { class: 'fr', x: f1(cx), y: f1(FULL ? cy + 9 : cy - 5), 'text-anchor': 'middle', 'font-size': 9 }, trunc([nm0.rest].join(''), 16))));
   return svg;
 }
 
@@ -2729,7 +2764,7 @@ const AncestorsView = {
         if (!pr[0] && !pr[1]){ if (!x.donorId) miss.push('far og mor'); else miss.push('foreldre'); }
         else if (!pr[0] || !pr[1]){ const have = Store.persons.get(pr[0] || pr[1]); if (have.sex === 'f') miss.push('far'); else if (have.sex === 'm') miss.push('mor'); else miss.push('den andre forelderen'); }
         return h('li', { class: 'an-row' }, h('span', { class: 'an-n' }, n), personChip(x, lifeSpan(x)),
-          h('span', { class: 'faint an-pl' }, x.birthPlace && x.birthPlace.name ? x.birthPlace.name : ''),
+          h('span', { class: 'faint an-pl' }, x.birthPlace && x.birthPlace.name ? noPlace(x.birthPlace.name) : ''),
           x.donorId && Store.persons.get(x.donorId) ? h('span', { class: 'faint an-pl' }, 'Donor: ' + fullName(Store.persons.get(x.donorId))) : null,
           miss.length ? h('button', { class: 'btn sm ghost an-miss', onclick: () => App.go('person', x.id), 'aria-label': 'Mangler ' + miss.join(' og ') + ' for ' + fullName(x) }, 'Mangler ' + miss.join(' og ')) : null);
       });
@@ -3027,8 +3062,8 @@ const KinshipView = {
 /* ====== Steder, verifisering og kvalitetssjekk ====== */
 
 /* ---------- Steder ---------- */
-const placeKey = pl => { if (!pl) return ''; const k = norm(pl.kom || pl.name || ''); const r = norm(pl.region || ''); return k ? k + (r ? '|' + r : '') : ''; };
-const placeTitle = pl => { const k = pl.kom || pl.name || ''; return k + (pl.region ? ', ' + pl.region : ''); };
+const placeKey = pl => { if (!pl) return ''; const k = norm(noPlace(pl.kom || pl.name || '')); const r = norm(noPlace(pl.region || '')); return k ? k + (r ? '|' + r : '') : ''; };
+const placeTitle = pl => { const k = noPlace(pl.kom || pl.name || ''); return k + (pl.region ? ', ' + noPlace(pl.region) : ''); };
 function placeLinkEl(pl, text){
   const key = placeKey(pl);
   if (!key) return text || pl.name || '';
@@ -3082,7 +3117,7 @@ const PlacesView = {
     root.appendChild(h('div', { class: 'card' }, h('ul', { class: 'plist' }, list.map(e => {
       const n = t => e.ev.filter(x => x.type === t).length;
       const bits = [n('født') ? n('født') + ' født' : '', n('døde') ? n('døde') + ' døde' : '', n('bodde') ? n('bodde') + ' bodd' : '', n('utvandret') ? n('utvandret') + ' utvandret hit' : ''].filter(Boolean).join(' · ');
-      return h('li', null, h('a', { href: '#sted-' + encodeURIComponent(e.key), class: 'prow', onclick: ev => { ev.preventDefault(); App.go('place', e.key); } },
+      return h('li', null, h('a', { href: '#sted-' + encodeURIComponent(e.key), class: 'plrow', onclick: ev => { ev.preventDefault(); App.go('place', e.key); } },
         h('span', { class: 'pt' }, e.title, e.now && norm(e.now) !== norm(e.title) ? h('small', { class: 'faint' }, ' · nå ' + e.now) : null),
         h('span', { class: 'faint ps' }, bits || (e.photos.length ? countTxt(e.photos.length, 'bilde', 'bilder') : '')),
         h('span', { class: 'pc' }, countTxt(e.persons.size, 'person', 'personer'))));
@@ -3143,7 +3178,7 @@ const PlaceView = {
     [sect('Født her', 'født'), sect('Bodde her', 'bodde'), sect('Utvandret hit', 'utvandret'), sect('Døde her', 'døde')].forEach(c => c && root.appendChild(c));
     if (e.photos.length) root.appendChild(h('section', { class: 'card' }, h('h2', null, 'Bilder tatt her'), h('div', { class: 'thumbs' }, e.photos.map(ph => h('button', { class: 'thumb', 'aria-label': ph.caption || 'Bilde', onclick: () => Photos.open(ph.id, { list: e.photos.map(x => x.id) }) }, h('img', { src: photoUrl(ph), alt: '', loading: 'lazy', style: ph.w && ph.h ? { aspectRatio: ph.w + '/' + ph.h } : {} }), h('span', { class: 'cap' }, yearLabel(ph) || ph.caption || ' '))))));
     if (sameNow.length) root.appendChild(h('section', { class: 'card' }, h('h2', null, 'Samme område i dag'), h('p', { class: 'muted', style: { marginTop: 0 } }, 'Disse stedene er i dag en del av samme kommune.'),
-      h('ul', { class: 'plist' }, sameNow.map(x => h('li', null, h('a', { href: '#', class: 'prow', onclick: ev => { ev.preventDefault(); App.go('place', x.key); } }, h('span', { class: 'pt' }, x.title, x.now && norm(x.now) !== norm(x.title) ? h('small', { class: 'faint' }, ' · nå ' + x.now) : null), h('span', { class: 'faint ps' }, ''), h('span', { class: 'pc' }, countTxt(x.persons.size, 'person', 'personer'))))))));
+      h('ul', { class: 'plist' }, sameNow.map(x => h('li', null, h('a', { href: '#', class: 'plrow', onclick: ev => { ev.preventDefault(); App.go('place', x.key); } }, h('span', { class: 'pt' }, x.title, x.now && norm(x.now) !== norm(x.title) ? h('small', { class: 'faint' }, ' · nå ' + x.now) : null), h('span', { class: 'faint ps' }, ''), h('span', { class: 'pc' }, countTxt(x.persons.size, 'person', 'personer'))))))));
   }
 };
 
@@ -3310,7 +3345,7 @@ const BOOK_DEF = {
 };
 const escHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const sortPersons = (arr, how) => arr.sort(how === 'birth' ? ((a, b) => (a.birthYear == null) - (b.birthYear == null) || a.birthYear - b.birthYear || nameCmp(a, b)) : nameCmp);
-const placeName = pl => pl && pl.name ? pl.name : '';
+const placeName = pl => pl && pl.name ? noPlace(pl.name) : '';
 
 function splitText(t, max = 900){
   const out = [];
@@ -3800,7 +3835,7 @@ const App = {
   tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', places: 'register', place: 'register', quality: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
-    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '25.10 10:37')); } catch (_) {}
+    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '25.10 11:36')); } catch (_) {}
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
