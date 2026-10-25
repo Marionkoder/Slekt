@@ -67,7 +67,7 @@ const norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const clone = o => JSON.parse(JSON.stringify(o));
 const intOrNull = v => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
-const fullName = p => [p.given, p.family].filter(Boolean).join(' ') || 'Uten navn';
+const fullName = p => [p.given, p.patronym, p.family].filter(Boolean).join(' ') || 'Uten navn';
 const initials = p => ((p.given || '?')[0] + (p.family ? p.family[0] : '')).toUpperCase();
 const nameCmp = (a, b) => (a.family || '').localeCompare(b.family || '', 'nb') || (a.given || '').localeCompare(b.given || '', 'nb');
 const isDead = p => p.deathYear != null || !!p.deceased || !!(p.deathDate && p.deathDate.trim());
@@ -168,7 +168,7 @@ const GAZ = (() => {
 function usedPlaces(){
   const used = new Map();
   Store.persons.forEach(p => {
-    [p.birthPlace, p.deathPlace, ...(p.moves || []).map(m => m.place)].forEach(x => {
+    [p.birthPlace, p.deathPlace, p.emigratedTo, ...(p.moves || []).map(m => m.place)].forEach(x => {
       if (x && x.lat != null && x.name) used.set(x.name + '|' + x.lat.toFixed(3) + '|' + x.lon.toFixed(3), x);
     });
   });
@@ -205,6 +205,8 @@ function searchPlaces(q, limit = 8, o = {}){
   return out.slice(0, limit);
 }
 
+/* Døde før fylte 16 år (kjent fødsels- og dødsår). */
+const diedYoung = p => p.birthYear != null && p.deathYear != null && p.deathYear - p.birthYear < 16 && p.deathYear >= p.birthYear;
 /* Biologiske foreldre: far, mor og donor. Medforelder (juridisk, ikke biologisk) og steforeldre er ikke med. */
 const bioParentsOf = p => (p.adopted ? [p.bioFatherId, p.bioMotherId] : [p.fatherId, p.motherId, p.donorId]).filter((x, i, a) => x && a.indexOf(x) === i);
 /* Alle i biologisk slekt med person id: forfedre, og alle etterkommere av forfedrene (søsken, onkler, tanter, søskenbarn …), inkludert personen selv. */
@@ -303,14 +305,21 @@ const Idx = {
     return sameDonor ? 'hel' : '';
   },
   /* Steforeldre: partnerne til foreldrene som ikke selv er foreldre. Stebarn: partnerens barn som ikke er egne. */
+  /* Er «x» (partner til a) steforelder til et barn født cb? Ikke hvis forholdet var slutt før barnet ble født (død eller skilt/sluttet). */
+  _stepOk(a, x, cb){
+    const A = Store.persons.get(a);
+    const ends = [A && A.deathYear, x.p.deathYear, x.endYear].filter(v => v != null);
+    if (!ends.length || cb == null) return true;
+    return cb <= Math.min(...ends);
+  },
   stepParentsOf(p){
     const out = new Map(), mine = parentsOf(p);
-    mine.forEach(q => this.partnersOf(q).forEach(x => { if (relKind(x) === 'foreldre') return; if (x.p.id === p.id || mine.includes(x.p.id) || x.p.id === p.donorId) return; if (!out.has(x.p.id)) out.set(x.p.id, { p: x.p, via: Store.persons.get(q) }); }));
+    mine.forEach(q => this.partnersOf(q).forEach(x => { if (relKind(x) === 'foreldre') return; if (x.p.id === p.id || mine.includes(x.p.id) || x.p.id === p.donorId || !this._stepOk(q, x, p.birthYear)) return; if (!out.has(x.p.id)) out.set(x.p.id, { p: x.p, via: Store.persons.get(q) }); }));
     return [...out.values()];
   },
   stepKidsOf(p){
     const out = new Map();
-    this.partnersOf(p.id).forEach(x => { if (relKind(x) === 'foreldre') return; this.kidsOf(x.p.id).forEach(c => { if (c.id !== p.id && !parentsOf(c).includes(p.id) && !out.has(c.id)) out.set(c.id, { p: c, via: x.p }); }); });
+    this.partnersOf(p.id).forEach(x => { if (relKind(x) === 'foreldre') return; this.kidsOf(x.p.id).forEach(c => { if (c.id !== p.id && !parentsOf(c).includes(p.id) && this._stepOk(p.id, x, c.birthYear) && !out.has(c.id)) out.set(c.id, { p: c, via: x.p }); }); });
     return [...out.values()].sort((a, b) => (a.p.birthYear || 9999) - (b.p.birthYear || 9999));
   }
 };
@@ -327,10 +336,15 @@ const Store = {
   _cleanFlags(){
     if (!this.canWrite) return;
     this.persons.forEach(p => {
-      if (!p.noKids && !p.noSiblings) return;
+      const kids = Idx.kidsOf(p.id).length, sibs = Idx.siblingsOf(p).length, prts = Idx.partnersOf(p.id).length;
+      const young = diedYoung(p);
+      if (!p.noKids && !p.noSiblings && !p.noPartners && !(young && (!kids || !prts))) return;
       const q = clone(p); let ch = false;
-      if (q.noKids && Idx.kidsOf(p.id).length){ delete q.noKids; ch = true; }
-      if (q.noSiblings && Idx.siblingsOf(p).length){ delete q.noSiblings; ch = true; }
+      if (q.noKids && kids){ delete q.noKids; ch = true; }
+      if (q.noSiblings && sibs){ delete q.noSiblings; ch = true; }
+      if (q.noPartners && prts){ delete q.noPartners; ch = true; }
+      if (young && !kids && !q.noKids){ q.noKids = true; ch = true; }
+      if (young && !prts && !q.noPartners){ q.noPartners = true; ch = true; }
       if (ch){ this.persons.set(q.id, q); this._write('persons', q); }
     });
   },
@@ -441,6 +455,7 @@ function timelineOf(p){
   const ok = pl => pl && pl.lat != null && pl.lon != null;
   if (p.birthYear != null && ok(p.birthPlace)) a.push({ year: p.birthYear, place: p.birthPlace, kind: 'birth' });
   (p.moves || []).forEach(m => { if (m.year != null && ok(m.place)) a.push({ year: m.year, place: m.place, kind: 'move' }); });
+  if (p.emigratedYear != null && ok(p.emigratedTo)) a.push({ year: p.emigratedYear, place: p.emigratedTo, kind: 'move' });
   if (p.deathYear != null && ok(p.deathPlace)) a.push({ year: p.deathYear, place: p.deathPlace, kind: 'death' });
   a.sort((x, y) => x.year - y.year);
   return a;
@@ -1217,15 +1232,22 @@ function openPersonForm(opts = {}){
   const adoptChk = h('label', { class: 'bk-chk', for: 'f-adopted' }, h('input', { type: 'checkbox', id: 'f-adopted', checked: !!f.adopted, onchange: e => { f.adopted = e.target.checked; donorUpd(); } }), h('span', null, 'Adoptert', h('small', null, 'Vis felt for adopsjon og biologiske foreldre.')));
   const patWrap = fld('Patronym (valgfritt)', patInp, 'full');
   const patUpd = () => { patWrap.style.display = ((f.birthYear != null && f.birthYear < 1900) || (f.patronym || '').trim()) ? '' : 'none'; };
+  const youngUpd = () => {
+    if (!diedYoung(f)) return;
+    const set = (id, key) => { const el = document.getElementById(id); if (el && !f[key]){ f[key] = true; el.checked = true; } };
+    if (!f.partners.some(x => x.id)) set('f-nopart', 'noPartners');
+    if (!Idx.kidsOf(f.id).length) set('f-nokids', 'noKids');
+  };
   const donorUpd = () => { donorChk.style.display = ((f.birthYear != null && f.birthYear < 1970) && !f.donorConceived) ? 'none' : ''; donorWrap.style.display = f.donorConceived ? '' : 'none'; adoptWrap.style.display = f.adopted ? '' : 'none'; };
   patUpd(); donorUpd();
-  const form = h('form', { class: 'modal-b', novalidate: true, oninput: () => { patUpd(); donorUpd(); }, onsubmit: async e => {
+  const form = h('form', { class: 'modal-b', novalidate: true, oninput: () => { patUpd(); donorUpd(); youngUpd(); }, onsubmit: async e => {
     e.preventDefault();
     if (!(f.given || '').trim() && !(f.family || '').trim()){ given.focus(); toast('Skriv inn et navn først.'); return; }
     saveBtn.disabled = true;
     const o = clone(f);
     o.given = (o.given || '').trim(); o.family = (o.family || '').trim(); o.birthName = (o.birthName || '').trim(); o.patronym = (o.patronym || '').trim(); if (!o.patronym) delete o.patronym;
     o.birthPlace = o.birthPlace && (o.birthPlace.name || o.birthPlace.lat != null) ? o.birthPlace : null;
+    o.emigratedTo = o.emigratedTo && (o.emigratedTo.name || o.emigratedTo.lat != null) ? o.emigratedTo : null; if (!o.emigratedTo) delete o.emigratedTo; if (o.emigratedYear == null || !o.emigratedTo) delete o.emigratedYear;
     o.deathPlace = o.deathPlace && (o.deathPlace.name || o.deathPlace.lat != null) ? o.deathPlace : null;
     o.moves = (o.moves || []).filter(m => m.place && (m.place.name || m.place.lat != null)).sort((a, b) => (a.year == null) - (b.year == null) || (a.year || 0) - (b.year || 0));
     const seen = new Set();
@@ -1240,7 +1262,7 @@ function openPersonForm(opts = {}){
     if (!o.coParentId) delete o.coParentId; if (!o.donorId) delete o.donorId;
     if (!o.deceased || o.deathYear != null) delete o.deceased;
     o.deathCause = (o.deathCause || '').trim(); if (!o.deathCause || !(o.deceased || o.deathYear != null || (o.deathDate || '').trim() || o.deathPlace)) delete o.deathCause;
-    if (!o.noKids) delete o.noKids; if (!o.noSiblings) delete o.noSiblings;
+    if (!o.noKids) delete o.noKids; if (!o.noSiblings) delete o.noSiblings; if (!o.noPartners) delete o.noPartners;
     const saved = await Store.savePerson(o);
     // fjern gjensidige partnerlenker som er tatt bort i skjemaet
     for (const oid of incoming){
@@ -1257,6 +1279,8 @@ function openPersonForm(opts = {}){
     h('div', { class: 'fs' }, h('h3', null, 'Født'),
       h('div', { class: 'fgrid' }, fld('År', yearInp('birthYear', 'f.eks. 1872'), 'half-m'), fld('Dato eller detaljer', textInp('birthDate', 'f.eks. 12. mars'), 'half-m'),
         fld('Fødested', placeField(f.birthPlace, pl => f.birthPlace = pl, { label: 'Fødested' }), 'full'))),
+    h('div', { class: 'fs' }, h('h3', null, 'Utvandret'),
+      h('div', { class: 'fgrid' }, fld('Utvandret til', placeField(f.emigratedTo, pl => f.emigratedTo = pl, { label: 'Utvandret til', placeholder: 'Land, sted eller kommune, f.eks. Minnesota, USA' }), 'full'), fld('År (valgfritt)', yearInp('emigratedYear', 'f.eks. 1882'), 'half-m'))),
     h('div', { class: 'fs' }, h('h3', null, 'Død'),
       h('div', { class: 'fgrid' }, fld('År', yearInp('deathYear', 'f.eks. 1941'), 'half-m'), fld('Dato eller detaljer', textInp('deathDate', 'f.eks. 3. januar'), 'half-m'),
         fld('Dødssted', placeField(f.deathPlace, pl => f.deathPlace = pl, { label: 'Dødssted' }), 'full'),
@@ -1267,7 +1291,8 @@ function openPersonForm(opts = {}){
         fld('Medforelder', parentField('coparent'), 'half-m'), donorWrap),
       h('div', { class: 'chkrow' }, donorChk, adoptChk), adoptWrap,
       h('p', { class: 'faint', style: { fontSize: '13px', margin: '6px 0 0' } }, 'Medforelder er den andre juridiske forelderen når foreldrene har samme kjønn, for eksempel medmor eller medfar. Donor er den biologiske forelderen som ikke er juridisk forelder, for eksempel sæddonor, eggdonor eller surrogat.')),
-    h('div', { class: 'fs' }, h('h3', null, 'Partnere'), partnersBox),
+    h('div', { class: 'fs' }, h('h3', null, 'Partnere'), partnersBox,
+      h('label', { class: 'bk-chk', for: 'f-nopart' }, h('input', { type: 'checkbox', id: 'f-nopart', checked: !!f.noPartners, onchange: e => f.noPartners = e.target.checked }), h('span', null, 'Ingen kjente partnere', h('small', null, 'Gjelder når det ikke er registrert noen partnere.')))),
     h('div', { class: 'fs' }, h('h3', null, 'Barn og søsken'),
       h('label', { class: 'bk-chk', for: 'f-nokids' }, h('input', { type: 'checkbox', id: 'f-nokids', checked: !!f.noKids, onchange: e => f.noKids = e.target.checked }), h('span', null, 'Ingen kjente barn', h('small', null, 'Gjelder når det ikke er registrert noen barn.'))),
       h('label', { class: 'bk-chk', for: 'f-nosibs' }, h('input', { type: 'checkbox', id: 'f-nosibs', checked: !!f.noSiblings, onchange: e => f.noSiblings = e.target.checked }), h('span', null, 'Ingen kjente søsken', h('small', null, 'Gjelder når det ikke er registrert noen søsken.')))),
@@ -1427,6 +1452,7 @@ function lifeEvents(p){
     if (x.endYear != null) ev.push({ y: x.endYear, k: 'u', t: (k === 'gift' ? 'Ble skilt fra ' : k === 'samboer' ? 'Samboerskapet med ' + fullName(x.p) + ' tok slutt' : 'Forholdet til ' + fullName(x.p) + ' tok slutt') + (k === 'gift' ? fullName(x.p) : '') });
   });
   Idx.kidsOf(p.id).forEach(c => { if (c.birthYear != null) ev.push({ y: c.birthYear, k: 'k', t: 'Barn født: ' + fullName(c) }); });
+  if (p.emigratedTo) ev.push({ y: p.emigratedYear == null ? null : p.emigratedYear, k: 'u', t: 'Utvandret til ' + pn(p.emigratedTo) });
   if (p.deathYear != null || p.deathPlace || isDead(p)) ev.push({ y: p.deathYear, k: 'd', t: (p.deathYear == null && !p.deathPlace && !(p.deathDate || '').trim() ? 'Død, tidspunkt ukjent' : 'Døde') + (pn(p.deathPlace) ? ' i ' + pn(p.deathPlace) : ''), s: p.deathDate });
   return ev.map((e, i) => Object.assign(e, { i })).sort((a, b) => (a.y == null) - (b.y == null) || (a.y || 0) - (b.y || 0) || a.i - b.i);
 }
@@ -1465,6 +1491,7 @@ const PersonView = {
     if (p.adopted) row('Adoptert', p.adoptYear != null ? 'Ja, ' + p.adoptYear : 'Ja');
     row('Født', [p.birthYear != null ? String(p.birthYear) : null, p.birthDate, p.birthPlace && pn(p.birthPlace)].filter(Boolean).join(' · '));
     row('Dødsårsak', p.deathCause || '');
+    row('Utvandret til', p.emigratedTo ? [p.emigratedYear != null ? String(p.emigratedYear) : null, pn(p.emigratedTo)].filter(Boolean).join(' · ') : '');
     row('Død', [p.deathYear != null ? String(p.deathYear) : null, p.deathDate, p.deathPlace && pn(p.deathPlace)].filter(Boolean).join(' · ') || (isDead(p) ? 'Ja, tidspunkt ukjent' : ''));
     row('Kjønn', p.sex === 'm' ? 'Mann' : p.sex === 'f' ? 'Kvinne' : '');
     const lastMove = (p.moves || []).filter(m => m.place && m.place.name).slice(-1)[0];
@@ -1534,7 +1561,7 @@ const PersonView = {
       grp('Foreldre', [parents.map(x => personChip(x, p.adopted ? (x.id === p.fatherId ? 'adoptivfar' : x.id === p.motherId ? 'adoptivmor' : 'adoptivforelder') : (x.id === p.fatherId ? 'far' : x.id === p.motherId ? 'mor' : 'medforelder'))), bioPar.map(x => personChip(x, x.id === p.bioFatherId ? 'biologisk far' : 'biologisk mor')), donor ? personChip(donor, 'donor') : null],
         parents.length >= 2 ? [!p.donorId && donorOk ? addBtn('Donor', () => addParent('donor')) : null]
           : [!p.fatherId ? addBtn('Far', () => addParent('father')) : null, !p.motherId ? addBtn('Mor', () => addParent('mother')) : null, addBtn('Medforelder', () => addParent('coparent')), !p.donorId && donorOk ? addBtn('Donor', () => addParent('donor')) : null]),
-      grp('Partner', partners.map(x => personChip(x.p, relShort(x))), addBtn('Partner', addPartner)),
+      grp('Partner', partners.map(x => personChip(x.p, relShort(x))), addBtn('Partner', addPartner), noneBox('noPartners', 'Ingen kjente partnere', partners.length)),
       grp('Barn', kids.map(x => personChip(x, x.birthYear != null ? 'f. ' + x.birthYear : '')), addBtn('Barn', addChild), noneBox('noKids', 'Ingen kjente barn', kids.length)),
       adoptOut.length ? grp('Bortadopterte barn', adoptOut.map(x => personChip(x, x.birthYear != null ? 'f. ' + x.birthYear : '')), null) : null,
       donorKids.length ? grp('Donorbarn', donorKids.map(x => personChip(x, x.birthYear != null ? 'f. ' + x.birthYear : '')), null) : null,
@@ -1714,32 +1741,74 @@ const TreeView = {
     this.update(); this.fit();
   },
   draw(set){
-    const CW = 224, CH = 76;
-    const g = new dagre.graphlib.Graph();
-    g.setGraph({ rankdir: 'TB', nodesep: 24, ranksep: 64, marginx: 24, marginy: 24 });
-    g.setDefaultEdgeLabel(() => ({}));
-    set.forEach(id => g.setNode('p' + id, { width: CW, height: CH, kind: 'p', id }));
+    const CW = 224, CH = 76, GAP = 44;
+    // 1. fellesskap: partnere og foreldrepar
     const unions = new Map();
-    const U = (a, b) => { const key = [a, b].filter(Boolean).sort().join('|'); if (!unions.has(key)) unions.set(key, { key, ids: [a, b].filter(Boolean), kids: [] }); return unions.get(key); };
+    const U = (x, y) => { const key = [x, y].filter(Boolean).sort().join('|'); if (!unions.has(key)) unions.set(key, { key, ids: [x, y].filter(Boolean), kids: [] }); return unions.get(key); };
     set.forEach(id => { const p = Store.persons.get(id); const pp = parentPair(p), f = set.has(pp[0]) ? pp[0] : null, m = set.has(pp[1]) ? pp[1] : null; if (f || m) U(f, m).kids.push(id); });
     set.forEach(id => Idx.partnersOf(id).forEach(x => { if (set.has(x.p.id) && id < x.p.id) U(id, x.p.id); }));
-    unions.forEach(u => {
-      g.setNode('u' + u.key, { width: 10, height: 10, kind: 'u' });
-      u.ids.forEach(i => g.setEdge('p' + i, 'u' + u.key));
-      u.kids.forEach(k => g.setEdge('u' + u.key, 'p' + k));
+    // grupper av personer som henger sammen via par (vises ved siden av hverandre)
+    const par = new Map(); const find = x => { while (par.get(x) !== x){ par.set(x, par.get(par.get(x))); x = par.get(x); } return x; };
+    set.forEach(id => par.set(id, id));
+    unions.forEach(u => { if (u.ids.length === 2) par.set(find(u.ids[0]), find(u.ids[1])); });
+    const comps = new Map(); set.forEach(id => { const r = find(id); if (!comps.has(r)) comps.set(r, []); comps.get(r).push(id); });
+    const pairs = [...unions.values()].filter(u => u.ids.length === 2);
+    const groups = []; const gOf = new Map();
+    comps.forEach(ids => {
+      let order;
+      if (ids.length === 1) order = ids;
+      else {
+        // lag en rekkefølge langs partnerlenkene, start i en ende
+        const adj = new Map(ids.map(i => [i, []]));
+        pairs.forEach(u => { if (adj.has(u.ids[0]) && adj.has(u.ids[1])){ adj.get(u.ids[0]).push(u.ids[1]); adj.get(u.ids[1]).push(u.ids[0]); } });
+        const sexRank = i => { const sx = Store.persons.get(i).sex; return sx === 'm' ? 0 : sx === 'f' ? 1 : 2; };
+        const start = [...ids].sort((x, y) => adj.get(x).length - adj.get(y).length || sexRank(x) - sexRank(y) || (x < y ? -1 : 1))[0];
+        order = []; const seen = new Set();
+        const walk = i => { seen.add(i); order.push(i); adj.get(i).filter(j => !seen.has(j)).sort((x, y) => sexRank(x) - sexRank(y)).forEach(j => { if (!seen.has(j)) walk(j); }); };
+        walk(start);
+      }
+      const gi = groups.length; groups.push({ ids: order, w: order.length * CW + (order.length - 1) * GAP });
+      order.forEach((i, k) => gOf.set(i, { gi, k }));
     });
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({ rankdir: 'TB', nodesep: 28, ranksep: 70, marginx: 24, marginy: 24 });
+    g.setDefaultEdgeLabel(() => ({}));
+    groups.forEach((gr, gi) => g.setNode('g' + gi, { width: gr.w, height: CH }));
+    const gEdges = new Set();
+    unions.forEach(u => u.kids.forEach(k => { const src = gOf.get(u.ids[0]).gi, dst = gOf.get(k).gi; if (src !== dst){ const key = src + '>' + dst; if (!gEdges.has(key)){ gEdges.add(key); g.setEdge('g' + src, 'g' + dst); } } }));
     dagre.layout(g);
-    const gr = g.graph();
-    this.dim = { w: gr.width, h: gr.height };
+    const gr0 = g.graph();
+    this.dim = { w: gr0.width, h: gr0.height };
     this.nodes = {};
     clear(this.gv);
-    const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveMonotoneY);
+    const pos = new Map(); // person -> {x, y}
+    groups.forEach((gr, gi) => { const n = g.node('g' + gi); gr.ids.forEach((id, k) => { const x = n.x - gr.w / 2 + k * (CW + GAP) + CW / 2; pos.set(id, { x, y: n.y }); this.nodes['p' + id] = { x, y: n.y }; }); });
     const eg = h('g'), ng = h('g');
-    g.edges().forEach(e => { const pts = g.edge(e).points; if (pts && pts.length) eg.appendChild(h('path', { class: 'edge', d: line(pts) })); });
-    g.nodes().forEach(nid => {
-      const n = g.node(nid); this.nodes[nid] = n;
-      if (n.kind === 'u'){ ng.appendChild(h('circle', { class: 'union', cx: n.x, cy: n.y, r: 4 })); return; }
-      const p = Store.persons.get(n.id);
+    const down = d3.line().x(d => d[0]).y(d => d[1]).curve(d3.curveBumpY);
+    unions.forEach(u => {
+      let ux, uy;
+      if (u.ids.length === 2){
+        const A = pos.get(u.ids[0]), B = pos.get(u.ids[1]);
+        const adjacent = A.y === B.y && Math.abs(Math.abs(A.x - B.x) - (CW + GAP)) < 1;
+        if (adjacent){
+          const l = A.x < B.x ? A : B, r = A.x < B.x ? B : A;
+          eg.appendChild(h('path', { class: 'edge couple', d: 'M' + (l.x + CW / 2) + ',' + l.y + 'H' + (r.x - CW / 2) }));
+          ux = (l.x + r.x) / 2; uy = l.y;
+        } else {
+          // ikke ved siden av hverandre: bue under kortene
+          const y0 = Math.max(A.y, B.y) + CH / 2, dyy = 22;
+          eg.appendChild(h('path', { class: 'edge couple', d: 'M' + A.x + ',' + (A.y + CH / 2) + 'V' + (y0 + dyy) + 'H' + B.x + 'V' + (B.y + CH / 2) }));
+          ux = (A.x + B.x) / 2; uy = y0 + dyy;
+        }
+        if (u.kids.length || true) ng.appendChild(h('circle', { class: 'union', cx: ux, cy: uy, r: 4.5 }));
+      } else { const A = pos.get(u.ids[0]); ux = A.x; uy = A.y + CH / 2; }
+      u.kids.forEach(k => { const K = pos.get(k); if (!K) return; const y1 = K.y - CH / 2;
+        const y0 = u.ids.length === 2 ? uy + CH / 2 + 10 : uy + 8, y2 = y1 - 4, mid = (y0 + y2) / 2;
+        eg.appendChild(h('path', { class: 'edge', d: 'M' + ux + ',' + uy + 'V' + y0 + 'C' + ux + ',' + mid + ' ' + K.x + ',' + mid + ' ' + K.x + ',' + y2 })); });
+    });
+    set.forEach(id => {
+      const n = Object.assign({ id }, pos.get(id));
+      const p = Store.persons.get(id);
       const card = h('div', { class: 'pcard ' + (p.sex === 'm' ? 'm' : p.sex === 'f' ? 'f' : '') + (n.id === this.sel ? ' sel' : ''), role: 'button', tabindex: 0, 'aria-label': fullName(p) },
         avatar(p, 36), h('div', { class: 'b' }, h('div', { class: 'n' }, fullName(p)), h('div', { class: 'y' }, lifeSpan(p)), siblingText(p) ? h('div', { class: 'sb' }, siblingText(p)) : null));
       const act = () => { this.sel = n.id; this.update(); };
@@ -3042,6 +3111,7 @@ async function composeBook(o, inc){
         const d = [p.deathYear != null ? String(p.deathYear) : null, p.deathDate, placeName(p.deathPlace)].filter(Boolean).join(' · ') || (isDead(p) ? 'tidspunkt ukjent' : '');
         if (p.patronym) rows.push(['Patronym', p.patronym]);
         if (b) rows.push(['Født', b]);
+        if (p.emigratedTo) rows.push(['Utvandret til', [p.emigratedYear != null ? String(p.emigratedYear) : null, placeName(p.emigratedTo)].filter(Boolean).join(' · ')]);
         if (d) rows.push(['Død', d]);
         if (p.deathCause) rows.push(['Dødsårsak', p.deathCause]);
         if (rows.length) B(h('dl', { class: 'bk-facts' }, rows.map(([k, v]) => [h('dt', null, k), h('dd', null, v)])));
@@ -3055,7 +3125,7 @@ async function composeBook(o, inc){
         if (par.length) rows.push(['Foreldre', list(par, x => [nameWithRef(x), x.id === p.fatherId ? ' (far)' : x.id === p.motherId ? ' (mor)' : ' (medforelder)'])]);
         if (p.adopted){ rows.push(['Adoptert', [p.adoptYear != null ? String(p.adoptYear) : 'ja']]); const bp = [p.bioFatherId, p.bioMotherId].map(i => i && Store.persons.get(i)).filter(Boolean); if (bp.length) rows.push(['Biologiske foreldre', list(bp, x => [nameWithRef(x), x.id === p.bioFatherId ? ' (far)' : ' (mor)'])]); }
         if (donor) rows.push(['Donor', [nameWithRef(donor)]]);
-        if (prt.length) rows.push(['Partner', list(prt, x => [nameWithRef(x.p), relShort(x) ? ' (' + relShort(x) + ')' : ''])]);
+        if (prt.length) rows.push(['Partner', list(prt, x => [nameWithRef(x.p), relShort(x) ? ' (' + relShort(x) + ')' : ''])]); else if (p.noPartners) rows.push(['Partner', ['ingen kjente']]);
         if (kids.length) rows.push(['Barn', list(kids, x => [nameWithRef(x), year(x)])]); else if (p.noKids) rows.push(['Barn', ['ingen kjente']]);
         if (!sib.length && p.noSiblings) rows.push(['Søsken', ['ingen kjente']]);
         if (sib.length) rows.push(['Søsken', list(sib, x => { const k = Idx.siblingKind(p, x); return [nameWithRef(x), year(x), k === 'halv' ? ' (halvsøsken)' : k === 'hel' && (p.donorId || x.donorId) ? ' (helsøsken)' : '']; })]);
@@ -3358,7 +3428,7 @@ const App = {
   tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
-    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '25.10 07:53')); } catch (_) {}
+    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '25.10 09:18')); } catch (_) {}
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
