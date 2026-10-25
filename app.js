@@ -36,7 +36,7 @@ const ICONS = {
   tree:'<rect x="9" y="3" width="6" height="4.5" rx="1"/><rect x="3" y="16.5" width="6" height="4.5" rx="1"/><rect x="15" y="16.5" width="6" height="4.5" rx="1"/><path d="M12 7.5V12M6 16.5V12h12v4.5"/>',
   pin:'<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>',
   image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="m3 17 5-4.5 4 3.5 3-2.5 6 5"/>',
-  plus:'<path d="M12 5v14M5 12h14"/>', minus:'<path d="M5 12h14"/>',
+  check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>', plus:'<path d="M12 5v14M5 12h14"/>', minus:'<path d="M5 12h14"/>',
   play:'<path d="M8 5.5v13l11-6.5z" fill="currentColor"/>',
   pause:'<path d="M8.5 5v14M15.5 5v14" stroke-width="3"/>',
   replay:'<path d="M4.5 12a7.5 7.5 0 1 0 2.4-5.5M4.5 4v4.8h4.8"/>',
@@ -482,6 +482,12 @@ function cropGeom(photo, c){
   const cx = Math.min(1 - hx, Math.max(hx, c.cx == null ? 0.5 : c.cx)), cy = Math.min(1 - hy, Math.max(hy, c.cy == null ? 0.5 : c.cy));
   return { w: w / side * 100, l: (0.5 - cx * w / side) * 100, t: (0.5 - cy * hh / side) * 100, cx, cy, side };
 }
+/* Ekstra profilbilder for ulike aldersperioder (vises bare på personsiden). */
+const AGE_SLOTS = [['0-1', '0–1 år', 0, 1], ['2-5', '2–5 år', 2, 5], ['6-12', '6–12 år', 6, 12], ['13-19', '13–19 år', 13, 19], ['20-40', '20–40 år', 20, 40], ['40-60', '40–60 år', 40, 60], ['60-100', '60–100 år', 60, 100]];
+function slotPortrait(p, key){
+  const c = p.portraits && p.portraits[key]; const ph = c && Store.photos.get(c.photoId);
+  return ph && ph.assetId && ph.w && ph.h && !isSource(ph) ? { c, ph } : null;
+}
 function avatar(p, size = 40){
   const box = h('span', { class: 'av ' + (p.sex === 'm' ? 'm' : p.sex === 'f' ? 'f' : ''), style: { '--s': size + 'px' } });
   const list = Idx.photosOf.get(p.id);
@@ -518,6 +524,10 @@ function siblingText(p){
   const names = s.slice(0, 3).map(x => x.given || fullName(x));
   return 'Søsken: ' + names.join(', ') + (s.length > 3 ? ' +' + (s.length - 3) : '');
 }
+
+const DEATH_CATS = ['Alderdom','Infeksjonssykdom','Hjerte- og karsykdom','Kreft','Luftveissykdom (ikke infeksiøs)','Nevrologisk sykdom og demens','Annen sykdom','Ulykke','Drukning','Barsel og fødsel','Spedbarns- og barnedød','Krig, vold og drap','Selvmord','Annet','Ukjent'];
+const deathCatOf = p => { if (p.deathCat) return p.deathCat; const t = (p.deathCause || '').trim().toLowerCase(); return DEATH_CATS.find(x => x.toLowerCase() === t) || ''; };
+const deathSpecOf = p => { const t = (p.deathCause || '').trim(); return t && t.toLowerCase() !== (deathCatOf(p) || '').toLowerCase() ? t : ''; };
 
 /* ====== Lokal lagring (GitHub-versjonen), sikkerhetskopi og gjenoppretting ====== */
 const URLS = new Map();   // assetId -> blob-adresse (kun lokal modus)
@@ -1261,7 +1271,7 @@ function openPersonForm(opts = {}){
     else { if (o.adoptYear == null) delete o.adoptYear; if (!o.bioFatherId || o.bioFatherId === o.id) delete o.bioFatherId; if (!o.bioMotherId || o.bioMotherId === o.id) delete o.bioMotherId; }
     if (!o.coParentId) delete o.coParentId; if (!o.donorId) delete o.donorId;
     if (!o.deceased || o.deathYear != null) delete o.deceased;
-    o.deathCause = (o.deathCause || '').trim(); if (!o.deathCause || !(o.deceased || o.deathYear != null || (o.deathDate || '').trim() || o.deathPlace)) delete o.deathCause;
+    o.deathCause = (o.deathCause || '').trim(); if (!o.deathCat) delete o.deathCat; if (!(o.deceased || o.deathYear != null || (o.deathDate || '').trim() || o.deathPlace)) delete o.deathCat; if (!o.deathCause || !(o.deceased || o.deathYear != null || (o.deathDate || '').trim() || o.deathPlace)) delete o.deathCause;
     if (!o.noKids) delete o.noKids; if (!o.noSiblings) delete o.noSiblings; if (!o.noPartners) delete o.noPartners;
     const saved = await Store.savePerson(o);
     // fjern gjensidige partnerlenker som er tatt bort i skjemaet
@@ -1284,7 +1294,8 @@ function openPersonForm(opts = {}){
     h('div', { class: 'fs' }, h('h3', null, 'Død'),
       h('div', { class: 'fgrid' }, fld('År', yearInp('deathYear', 'f.eks. 1941'), 'half-m'), fld('Dato eller detaljer', textInp('deathDate', 'f.eks. 3. januar'), 'half-m'),
         fld('Dødssted', placeField(f.deathPlace, pl => f.deathPlace = pl, { label: 'Dødssted' }), 'full'),
-        h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Dødsårsak'), h('input', { class: 'inp', type: 'text', value: f.deathCause || '', placeholder: 'f.eks. lungebetennelse, alderdom, drukning', autocomplete: 'off', oninput: e => f.deathCause = e.target.value })),
+        h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Dødsårsak, gruppe (vises ikke på personsiden)'), h('select', { class: 'inp', onchange: e => f.deathCat = e.target.value }, h('option', { value: '' }, 'Ikke bekreftet'), ...DEATH_CATS.map(v => h('option', { value: v, selected: deathCatOf(f) === v }, v)))),
+        h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Dødsårsak, spesifisering (valgfri)'), h('input', { class: 'inp', type: 'text', value: deathSpecOf(f), placeholder: 'f.eks. lungebetennelse, falt fra tak', autocomplete: 'off', oninput: e => f.deathCause = e.target.value })),
         h('label', { class: 'bk-chk full', for: 'f-deceased' }, h('input', { type: 'checkbox', id: 'f-deceased', checked: !!f.deceased, onchange: e => f.deceased = e.target.checked }), h('span', null, 'Personen er død', h('small', null, 'Kryss av hvis tidspunktet er ukjent. Er dødsåret fylt ut, regnes personen som død uansett.'))))),
     h('div', { class: 'fs' }, h('h3', null, 'Foreldre'),
       h('div', { class: 'fgrid' }, fld('Far', parentField('father'), 'half-m'), fld('Mor', parentField('mother'), 'half-m'),
@@ -1305,16 +1316,35 @@ function openPersonForm(opts = {}){
 }
 
 /* ====== Profilbilde: velg bilde og juster utsnittet ====== */
-function openPortraitEditor(p){
+/* Liste over profilbilder for ulike aldre (vises bare på personsiden). */
+function openAgePortraits(pid){
+  const host = h('div', { class: 'modal-b' });
+  const modal = openModal('Profilbilder gjennom livet', host, {});
+  const p = Store.persons.get(pid); if (!p) return modal;
+  host.appendChild(h('p', { class: 'faint', style: { fontSize: '13.5px', margin: '0 0 8px' } }, 'Disse vises bare inne på personsiden til ' + (p.given || 'personen') + '. Hovedprofilbildet brukes ellers overalt.'));
+  AGE_SLOTS.forEach(([k, label]) => {
+    const sp = slotPortrait(p, k);
+    host.appendChild(h('div', { class: 'age-row' }, sp ? avatar(Object.assign({}, p, { portrait: sp.c }), 52) : h('span', { class: 'av empty', style: { '--s': '52px' } }),
+      h('div', { class: 'age-l' }, h('b', null, label), h('span', { class: 'faint' }, sp ? (sp.ph.caption || 'Valgt') : 'Ikke valgt')),
+      h('button', { type: 'button', class: 'btn sm', onclick: () => { modal.close(); openPortraitEditor(Store.persons.get(pid), k, () => openAgePortraits(pid)); } }, sp ? 'Endre' : 'Velg bilde')));
+  });
+  return modal;
+}
+function openPortraitEditor(p, slot, cb){
   const phs = (Idx.photosOf.get(p.id) || []).map(x => x.photo).filter(ph => !isSource(ph) && ph.assetId && ph.w && ph.h);
   const uniq = [...new Map(phs.map(ph => [ph.id, ph])).values()];
   if (!uniq.length){ toast('Legg først inn et bilde og tagg ' + (p.given || 'personen') + ' i det.'); return; }
-  const cur = p.portrait && uniq.find(ph => ph.id === p.portrait.photoId);
+  const slotDef = slot ? AGE_SLOTS.find(x => x[0] === slot) : null;
+  const src0 = slot ? (p.portraits || {})[slot] : p.portrait;
+  const ageOf = x => (x.year != null && p.birthYear != null) ? x.year - p.birthYear : null;
+  const fits = x => slotDef && ageOf(x) != null && ageOf(x) >= slotDef[2] && ageOf(x) <= slotDef[3];
+  if (slotDef) uniq.sort((a, b) => (fits(b) ? 1 : 0) - (fits(a) ? 1 : 0));
+  const cur = src0 && uniq.find(ph => ph.id === src0.photoId);
   let ph = cur || uniq[0];
   const tagOf = x => { const t = (Idx.photosOf.get(p.id) || []).find(y => y.photo.id === x.id); return t && t.tag.x != null ? t.tag : null; };
   const st = { cx: 0.5, cy: 0.5, z: 1 };
   const init = () => {
-    if (cur && ph.id === p.portrait.photoId){ st.cx = p.portrait.cx; st.cy = p.portrait.cy; st.z = p.portrait.z || 1; }
+    if (cur && ph.id === src0.photoId){ st.cx = src0.cx; st.cy = src0.cy; st.z = src0.z || 1; }
     else { const t = tagOf(ph); st.cx = t ? t.x : 0.5; st.cy = t ? t.y : 0.5; st.z = t ? 2.5 : 1; }
   };
   init();
@@ -1357,18 +1387,19 @@ function openPortraitEditor(p){
   };
   const save = async () => {
     const q = clone(Store.persons.get(p.id));
-    q.portrait = { photoId: ph.id, cx: +st.cx.toFixed(4), cy: +st.cy.toFixed(4), z: +st.z.toFixed(3) };
-    await Store.savePerson(q); modal.close(); toast('Profilbildet er lagret');
+    const val = { photoId: ph.id, cx: +st.cx.toFixed(4), cy: +st.cy.toFixed(4), z: +st.z.toFixed(3) };
+    if (slot){ q.portraits = Object.assign({}, q.portraits || {}); q.portraits[slot] = val; } else q.portrait = val;
+    await Store.savePerson(q); modal.close(); toast('Profilbildet er lagret'); if (cb) cb();
   };
-  const reset = async () => { const q = clone(Store.persons.get(p.id)); delete q.portrait; await Store.savePerson(q); modal.close(); toast('Profilbildet velges automatisk igjen'); };
+  const reset = async () => { const q = clone(Store.persons.get(p.id)); if (slot){ if (q.portraits){ delete q.portraits[slot]; if (!Object.keys(q.portraits).length) delete q.portraits; } } else delete q.portrait; await Store.savePerson(q); modal.close(); toast(slot ? 'Profilbildet er fjernet' : 'Profilbildet velges automatisk igjen'); if (cb) cb(); };
   const body = h('div', { class: 'modal-b' }, h('div', { class: 'crop' },
     uniq.length > 1 ? thumbs : null,
     stage,
     h('div', { class: 'crop-row' }, h('span', { class: 'faint', style: { fontSize: '13px' } }, 'Zoom'), zoom, prev),
     h('p', { class: 'fnote', style: { margin: 0, textAlign: 'center' } }, 'Dra i bildet for å flytte utsnittet. Bruk glidebryteren for å zoome.')),
-    h('div', { class: 'form-actions' }, p.portrait ? h('button', { type: 'button', class: 'btn ghost', onclick: reset }, 'Velg automatisk') : h('span'),
+    h('div', { class: 'form-actions' }, src0 ? h('button', { type: 'button', class: 'btn ghost', onclick: reset }, slot ? 'Fjern' : 'Velg automatisk') : h('span'),
       h('div', { style: { display: 'flex', gap: '8px' } }, h('button', { type: 'button', class: 'btn ghost', onclick: () => modal.close() }, 'Avbryt'), h('button', { type: 'button', class: 'btn primary', onclick: save }, 'Lagre'))));
-  const modal = openModal('Profilbilde for ' + fullName(p), body, {});
+  const modal = openModal(slotDef ? 'Profilbilde ' + slotDef[1] + ' – ' + fullName(p) : 'Profilbilde for ' + fullName(p), body, {});
   drawThumbs(); apply();
 }
 
@@ -1396,6 +1427,7 @@ const RegisterView = {
       h('div', null, h('h1', null, 'Personregister'),
         h('p', null, n ? plural(n, 'person', 'personer') + (ys.length ? ' · eldste kjente fødselsår ' + Math.min(...ys) : '') : 'Ingen personer ennå')),
       h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, n > 1 ? h('button', { class: 'btn', onclick: () => App.go('kinship') }, ico('users', 16), 'Slektskap') : null,
+        n ? h('button', { class: 'btn', onclick: () => App.go('places') }, ico('pin', 16), 'Steder') : null, n ? h('button', { class: 'btn', onclick: () => App.go('quality') }, ico('check', 16), 'Kvalitetssjekk') : null,
         Store.canWrite ? h('button', { class: 'btn primary', onclick: () => openPersonForm({ onSaved: p => App.go('person', p.id) }) }, ico('plus', 18), 'Ny person') : null)));
     this.tools.style.display = n ? '' : 'none';
     this.list();
@@ -1477,6 +1509,7 @@ const PersonView = {
         h('div', { class: 'acts' },
           edit ? h('button', { class: 'btn', onclick: () => openPersonForm({ person: p }) }, ico('pencil', 16), 'Rediger') : null,
           edit ? h('button', { class: 'btn', onclick: () => openPortraitEditor(p) }, ico('image', 16), 'Profilbilde') : null,
+          edit ? h('button', { class: 'btn', onclick: () => openAgePortraits(p.id) }, ico('image', 16), 'Bilder etter alder') : null,
           h('button', { class: 'btn', onclick: () => App.go('ancestors', p.id) }, ico('users', 16), 'Aner'),
           h('button', { class: 'btn', onclick: () => App.go('descendants', p.id) }, ico('users', 16), 'Etterkommere'),
           h('button', { class: 'btn', onclick: () => App.go('kinship', p.id) }, ico('users', 16), 'Slektskap'),
@@ -1489,14 +1522,16 @@ const PersonView = {
     row('Født som', p.birthName || '');
     row('Patronym', p.patronym || '');
     if (p.adopted) row('Adoptert', p.adoptYear != null ? 'Ja, ' + p.adoptYear : 'Ja');
-    row('Født', [p.birthYear != null ? String(p.birthYear) : null, p.birthDate, p.birthPlace && pn(p.birthPlace)].filter(Boolean).join(' · '));
-    row('Dødsårsak', p.deathCause || '');
-    row('Utvandret til', p.emigratedTo ? [p.emigratedYear != null ? String(p.emigratedYear) : null, pn(p.emigratedTo)].filter(Boolean).join(' · ') : '');
-    row('Død', [p.deathYear != null ? String(p.deathYear) : null, p.deathDate, p.deathPlace && pn(p.deathPlace)].filter(Boolean).join(' · ') || (isDead(p) ? 'Ja, tidspunkt ukjent' : ''));
+    const jn = parts => parts.filter(x => x != null && x !== '').reduce((a, x, i) => a.concat(i ? [' · ', x] : [x]), []);
+    const plk = pl => pl ? (placeLinkEl(pl, pn(pl))) : null;
+    row('Født', jn([p.birthYear != null ? String(p.birthYear) : null, p.birthDate, plk(p.birthPlace)]));
+    row('Utvandret til', p.emigratedTo ? jn([p.emigratedYear != null ? String(p.emigratedYear) : null, plk(p.emigratedTo)]) : '');
+    { const dj = jn([p.deathYear != null ? String(p.deathYear) : null, p.deathDate, plk(p.deathPlace)]); row('Død', dj.length ? dj : (isDead(p) ? 'Ja, tidspunkt ukjent' : '')); }
     row('Kjønn', p.sex === 'm' ? 'Mann' : p.sex === 'f' ? 'Kvinne' : '');
     const lastMove = (p.moves || []).filter(m => m.place && m.place.name).slice(-1)[0];
-    row(isDead(p) ? 'Siste bosted' : 'Bosted', lastMove ? pn(lastMove.place) + (lastMove.year != null ? ' (fra ' + lastMove.year + ')' : '') : '');
+    row(isDead(p) ? 'Siste bosted' : 'Bosted', lastMove ? [plk(lastMove.place), lastMove.year != null ? ' (fra ' + lastMove.year + ')' : ''] : '');
     const factsCard = h('section', { class: 'card' }, h('h2', null, 'Fakta'), facts.children.length ? facts : h('p', { class: 'muted' }, 'Ingen opplysninger er lagt inn ennå.'));
+    const vCard = verifyCard(p, edit);
 
     // familie
     const parents = parentsOf(p).map(i => Store.persons.get(i)).filter(Boolean);
@@ -1616,8 +1651,11 @@ const PersonView = {
 
     const notesCard = p.notes && p.notes.trim() ? h('section', { class: 'card' }, h('h2', null, 'Notater'), h('p', { class: 'notes' }, p.notes)) : null;
 
+    const fanCard = parentsOf(p).some(i => Store.persons.has(i)) ? h('section', { class: 'card fan-card' }, h('h2', null, 'Anetavle', h('button', { class: 'btn sm ghost', onclick: () => App.go('ancestors', p.id) }, 'Se hele anetavlen')), fanChart(p, 3)) : null;
+    const ageList = AGE_SLOTS.map(([k, label]) => ({ k, label, sp: slotPortrait(p, k) })).filter(x => x.sp);
+    const ageCard = ageList.length ? h('section', { class: 'card' }, h('h2', null, 'Gjennom livet'), h('div', { class: 'age-strip' }, ageList.map(x => h('button', { type: 'button', class: 'age-it', 'aria-label': x.label, onclick: () => Photos.open(x.sp.ph.id, { list: ageList.map(y => y.sp.ph.id) }) }, avatar(Object.assign({}, p, { portrait: x.sp.c }), 72), h('span', { class: 'age-t' }, x.label))))) : null;
     root.append(back, hero, h('div', { class: 'cols' },
-      h('div', { class: 'stack' }, factsCard, fam, notesCard),
+      h('div', { class: 'stack' }, ageCard, factsCard, vCard, fam, fanCard, notesCard),
       h('div', { class: 'stack' }, lifeCard, mapCard, photoCard, srcCard)));
     if (this.pendingMap){ const f = this.pendingMap; this.pendingMap = null; f(); }
   }
@@ -2590,7 +2628,55 @@ const genUp = g => GEN_UP[g - 1] || ('Generasjon ' + g + ' bakover');
 const genDown = g => GEN_DOWN[g] || ('Generasjon ' + g + ' framover');
 const bookFrom = (patch) => { BookView.load(); Object.assign(BookView.o, patch); BookView.save(); App.go('book'); };
 
+/* ====== Anetavle i vifteform ====== */
+function fanChart(p, G = 3, o = {}){
+  const TH = [0, 76, 82, 88, 94, 100];
+  const r = [38]; for (let i = 1; i <= G; i++) r[i] = r[i - 1] + TH[i];
+  const W = 2 * r[G] + 24, Ht = r[G] + 34, cx = W / 2, cy = r[G] + 14;
+  const anc = new Map([[1, p]]);
+  (function fill(n){ if (n >= Math.pow(2, G)) return; const x = anc.get(n); if (!x) return; const pr = parentPair(x);
+    [[pr[0], 2 * n], [pr[1], 2 * n + 1]].forEach(([pid, nn]) => { const q = pid && Store.persons.get(pid); if (q){ anc.set(nn, q); fill(nn); } }); })(1);
+  const pt = (rad, a) => [cx + rad * Math.cos(a), cy - rad * Math.sin(a)];
+  const f1 = n => n.toFixed(1);
+  const trunc = (t, n) => t.length > n ? t.slice(0, Math.max(1, n - 1)) + '…' : t;
+  const parts = x => { const g = (x.given || '').trim().split(/\s+/).filter(Boolean); const first = g.shift() || ''; return { first: first.toUpperCase(), rest: [g.join(' '), x.patronym, x.family].filter(Boolean).join(' ') }; };
+  const svg = h('svg', { class: 'fan', viewBox: '0 0 ' + f1(W) + ' ' + f1(Ht), role: 'group', 'aria-label': 'Anetavle i vifteform for ' + fullName(p) });
+  for (let i = G; i >= 1; i--){
+    const n0 = Math.pow(2, i), span = Math.PI / n0, ri = r[i - 1], ro = r[i], thick = ro - ri;
+    for (let k = 0; k < n0; k++){
+      const n = n0 + k, x = anc.get(n), a0 = Math.PI - k * span, a1 = a0 - span;
+      const d = 'M' + pt(ri, a0).map(f1) + 'L' + pt(ro, a0).map(f1) + 'A' + ro + ',' + ro + ' 0 0 1 ' + pt(ro, a1).map(f1) + 'L' + pt(ri, a1).map(f1) + 'A' + ri + ',' + ri + ' 0 0 0 ' + pt(ri, a0).map(f1);
+      const gEl = h('g', { class: 'fan-w ring' + (i % 2) + (x ? '' : ' empty'), role: x ? 'link' : null, tabindex: x ? 0 : null, 'aria-label': x ? fullName(x) : null },
+        h('title', null, x ? fullName(x) + (lifeSpan(x) ? ' ' + lifeSpan(x) : '') : ''), h('path', { d }));
+      if (x){
+        const nm = parts(x), th = (a0 + a1) / 2, rm = (ri + ro) / 2, [tx, ty] = pt(rm, th);
+        const big = i <= 3, fs1 = i <= 2 ? 12.5 : i === 3 ? 11 : 9.5, fs2 = fs1 - 2.3;
+        const lines = [[trunc(nm.first, 0), 'f']];
+        let rot, maxc;
+        if (i <= 3){ rot = 90 - th * 180 / Math.PI; maxc = Math.max(8, Math.floor(rm * span * 0.88 / (fs2 * 0.56))); if (i === 1) maxc = Math.min(maxc, 20); } else { rot = -th * 180 / Math.PI; if (Math.cos(th) < 0) rot += 180; maxc = Math.floor((thick - 8) / (fs2 * 0.5)); }
+        const L = [{ t: trunc(nm.first, Math.floor(maxc * 0.85)), cls: 'fn', fs: fs1 }];
+        if (nm.rest) L.push({ t: trunc(nm.rest, maxc), cls: 'fr', fs: fs2 });
+        if (i <= 3 && lifeSpan(x)) L.push({ t: lifeSpan(x), cls: 'fy', fs: fs2 - .5 });
+        const lh = fs1 + 1.5, y0 = -(L.length - 1) * lh / 2;
+        const tg = h('g', { transform: 'translate(' + f1(tx) + ',' + f1(ty) + ') rotate(' + f1(rot) + ')' });
+        L.forEach((ln, j) => tg.appendChild(h('text', { class: ln.cls, x: 0, y: f1(y0 + j * (lh * (j ? .92 : 1))), 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-size': ln.fs }, ln.t)));
+        gEl.appendChild(tg);
+        const go = () => App.go('person', x.id);
+        gEl.addEventListener('click', go);
+        gEl.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); go(); } });
+      }
+      svg.appendChild(gEl);
+    }
+  }
+  const nm0 = parts(p);
+  svg.appendChild(h('g', { class: 'fan-c' }, h('path', { d: 'M' + pt(r[0], Math.PI).map(f1) + 'A' + r[0] + ',' + r[0] + ' 0 0 1 ' + pt(r[0], 0).map(f1) + 'Z' }),
+    h('text', { class: 'fn', x: f1(cx), y: f1(cy - 17), 'text-anchor': 'middle', 'font-size': 11.5 }, trunc(nm0.first, 11)),
+    h('text', { class: 'fr', x: f1(cx), y: f1(cy - 5), 'text-anchor': 'middle', 'font-size': 9 }, trunc([nm0.rest].join(''), 16))));
+  return svg;
+}
+
 const AncestorsView = {
+  fanMode: false, gens: 4,
   mount(root, id){ this.root = root; this.id = id; this.render(); },
   update(){ this.render(); },
   render(){
@@ -2621,9 +2707,19 @@ const AncestorsView = {
     const acts = h('div', { class: 'acts', style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '14px' } },
       h('button', { class: 'btn', onclick: () => App.go('tree', p.id) }, ico('tree', 16), 'Vis i slektstreet'),
       h('button', { class: 'btn', onclick: () => bookFrom({ anc: true, ancRoot: p.id }) }, ico('book', 16), 'Lag bok av anetavlen'),
-      h('button', { class: 'btn ghost', onclick: () => App.go('descendants', p.id) }, 'Etterkommere'));
+      h('button', { class: 'btn ghost', onclick: () => App.go('descendants', p.id) }, 'Etterkommere'),
+      h('div', { class: 'seg', role: 'group', 'aria-label': 'Visning', style: { marginLeft: 'auto' } },
+        h('button', { type: 'button', 'aria-pressed': String(!this.fanMode), onclick: () => { this.fanMode = false; this.render(); } }, 'Liste'),
+        h('button', { type: 'button', 'aria-pressed': String(this.fanMode), onclick: () => { this.fanMode = true; this.render(); } }, 'Vifte')));
     root.append(back, head, acts);
     if (!total){ root.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' }, 'Legg til far eller mor på personsiden for å bygge opp anetavlen.'))); return; }
+    if (this.fanMode){
+      const sel = h('select', { class: 'inp', style: { width: 'auto' }, 'aria-label': 'Antall generasjoner', onchange: e => { this.gens = +e.target.value; this.render(); } },
+        [3, 4, 5].map(g => h('option', { value: g, selected: g === this.gens }, g + ' generasjoner (' + (g === 3 ? 'til og med oldeforeldre' : g === 4 ? 'til og med tippoldeforeldre' : 'fem ledd') + ')')));
+      root.append(h('div', { class: 'card' }, h('div', { class: 'tools' }, sel), fanChart(p, this.gens),
+        h('p', { class: 'fnote' }, 'Viften viser bare direkte forfedre, så onkler og tanter er ikke med. Trykk på en person for å åpne siden hennes eller hans. Far står til venstre og mor til høyre på hvert nivå.')));
+      return;
+    }
     root.appendChild(h('p', { class: 'fnote' }, 'Nummereringen følger anetavlen: ' + (p.given || 'personen') + ' er nr. 1, og foreldrene får nr. 2 og 3 (far først når det er far og mor). Foreldrene til person n har nr. 2n og 2n+1. Antallet viser hvor mange av plassene i generasjonen som er fylt ut.'));
     levels.forEach((lv, i) => {
       const slots = Math.pow(2, i);
@@ -2775,11 +2871,12 @@ const StatsView = {
 
     // dødsårsaker
     const causes = new Map();
-    pool.filter(isDead).forEach(p => { const c = (p.deathCause || '').trim(); if (!c) return; const k = norm(c); const e = causes.get(k) || { label: c, n: 0 }; e.n++; causes.set(k, e); });
-    const dead = pool.filter(isDead), withCause = dead.filter(p => (p.deathCause || '').trim()).length;
+    const dead = pool.filter(isDead);
+    dead.forEach(p => { const c = deathCatOf(p); if (!c) return; causes.set(c, (causes.get(c) || 0) + 1); });
+    const withCause = dead.filter(p => deathCatOf(p)).length;
     const causeCard = h('section', { class: 'card' }, h('h2', null, 'Dødsårsaker'),
-      causes.size ? bars([...causes.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label, 'nb')).slice(0, 15).map(e => [e.label.charAt(0).toUpperCase() + e.label.slice(1), e.n]), '', true)
-        : h('p', { class: 'muted' }, 'Ingen dødsårsaker er lagt inn ennå. Du fyller dem inn på personen under «Død».'),
+      causes.size ? bars([...causes.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'nb')), '', true)
+        : h('p', { class: 'muted' }, 'Ingen dødsårsaker er lagt inn ennå. Du velger gruppe på personen under «Død».'),
       h('p', { class: 'fnote' }, 'Dødsårsak er oppgitt for ' + withCause + ' av ' + plural(dead.length, 'død person', 'døde personer') + '.'));
 
     const relMode = h('select', { class: 'inp', style: { width: 'auto', maxWidth: '100%' }, 'aria-label': 'Type slektninger', onchange: e => { this.relMode = e.target.value; this.render(); } },
@@ -2924,6 +3021,281 @@ const KinshipView = {
     const swap = h('button', { class: 'btn ghost sm', type: 'button', onclick: () => { const t = this.a; this.a = this.b; this.b = t; this.render(); } }, 'Bytt om');
     root.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Slektskap'), h('p', null, 'Velg to personer fra registeret og se hva slektskapet mellom dem er.'))),
       h('div', { class: 'card' }, h('div', { class: 'kin-grid' }, mk('a', 'Person 1'), mk('b', 'Person 2')), (this.a || this.b) ? h('div', { style: { marginTop: '8px' } }, swap) : null), res);
+  }
+};
+
+/* ====== Steder, verifisering og kvalitetssjekk ====== */
+
+/* ---------- Steder ---------- */
+const placeKey = pl => { if (!pl) return ''; const k = norm(pl.kom || pl.name || ''); const r = norm(pl.region || ''); return k ? k + (r ? '|' + r : '') : ''; };
+const placeTitle = pl => { const k = pl.kom || pl.name || ''; return k + (pl.region ? ', ' + pl.region : ''); };
+function placeLinkEl(pl, text){
+  const key = placeKey(pl);
+  if (!key) return text || pl.name || '';
+  return h('a', { href: '#sted-' + encodeURIComponent(key), class: 'plink', onclick: e => { e.preventDefault(); App.go('place', key); } }, text || (pl.name || pl.kom));
+}
+const PIN_SVG = '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 22s-7-6-7-12a7 7 0 0 1 14 0c0 6-7 12-7 12z" fill="#8A5A3C" stroke="#fff" stroke-width="1.6"/><circle cx="12" cy="10" r="2.6" fill="#fff"/></svg>';
+
+function collectPlaces(){
+  const M = new Map();
+  const add = (pl, pid, type, year, photo) => {
+    const key = placeKey(pl); if (!key) return;
+    let e = M.get(key);
+    if (!e){ e = { key, title: placeTitle(pl), now: pl.now || '', approx: false, pts: new Map(), farms: new Map(), ev: [], photos: [] }; M.set(key, e); }
+    if (pl.now && !e.now) e.now = pl.now;
+    if (pl.approx) e.approx = true;
+    if (pl.lat != null && pl.lon != null){
+      const pk = pl.lat.toFixed(3) + ',' + pl.lon.toFixed(3);
+      if (!e.pts.has(pk)) e.pts.set(pk, { lat: pl.lat, lon: pl.lon, name: pl.farm || '', farm: !!pl.farm });
+    }
+    if (pl.farm){ const f = e.farms.get(pl.farm) || { name: pl.farm, ids: new Set() }; if (pid) f.ids.add(pid); e.farms.set(pl.farm, f); }
+    if (photo) e.photos.push(photo); else e.ev.push({ pid, type, year, farm: pl.farm || '' });
+  };
+  Store.persons.forEach(p => {
+    if (p.birthPlace) add(p.birthPlace, p.id, 'født', p.birthYear);
+    if (p.deathPlace) add(p.deathPlace, p.id, 'døde', p.deathYear);
+    (p.moves || []).forEach(m => { if (m.place) add(m.place, p.id, 'bodde', m.year); });
+    if (p.emigratedTo) add(p.emigratedTo, p.id, 'utvandret', p.emigratedYear);
+  });
+  Store.photos.forEach(ph => { if (ph.place && !isSource(ph)) add(ph.place, null, 'bilde', ph.year, ph); });
+  M.forEach(e => { e.persons = new Set(e.ev.map(x => x.pid)); });
+  return M;
+}
+const countTxt = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+
+const PlacesView = {
+  q: '',
+  mount(root){ this.root = root; this.render(); },
+  update(){ this.render(); },
+  render(){
+    const root = clear(this.root);
+    const back = h('button', { class: 'back', onclick: () => App.go('register') }, ico('back', 18), 'Register');
+    const M = collectPlaces();
+    let list = [...M.values()];
+    const nq = norm(this.q);
+    if (nq) list = list.filter(e => norm(e.title).includes(nq) || norm(e.now || '').includes(nq) || [...e.farms.keys()].some(f => norm(f).includes(nq)));
+    list.sort((a, b) => b.persons.size - a.persons.size || a.title.localeCompare(b.title, 'nb'));
+    const search = h('input', { class: 'inp', type: 'search', placeholder: 'Søk etter sted eller gård …', value: this.q, 'aria-label': 'Søk etter sted', oninput: e => { this.q = e.target.value; clearTimeout(this._t); this._t = setTimeout(() => { this.render(); const i = this.root.querySelector('input[type=search]'); if (i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 200); } });
+    root.append(back, h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Steder'), h('p', null, countTxt(M.size, 'sted', 'steder') + ' er brukt i fødsel, død, bosted eller utvandring. Trykk på et sted for å se alle som er knyttet til det.'))),
+      h('div', { class: 'tools' }, h('div', { class: 'grow' }, search)));
+    if (!list.length){ root.appendChild(h('div', { class: 'empty' }, h('p', null, M.size ? 'Ingen steder passer søket.' : 'Ingen steder er lagt inn ennå. Legg inn fødested, dødssted eller bosteder på personene.'))); return; }
+    root.appendChild(h('div', { class: 'card' }, h('ul', { class: 'plist' }, list.map(e => {
+      const n = t => e.ev.filter(x => x.type === t).length;
+      const bits = [n('født') ? n('født') + ' født' : '', n('døde') ? n('døde') + ' døde' : '', n('bodde') ? n('bodde') + ' bodd' : '', n('utvandret') ? n('utvandret') + ' utvandret hit' : ''].filter(Boolean).join(' · ');
+      return h('li', null, h('a', { href: '#sted-' + encodeURIComponent(e.key), class: 'prow', onclick: ev => { ev.preventDefault(); App.go('place', e.key); } },
+        h('span', { class: 'pt' }, e.title, e.now && norm(e.now) !== norm(e.title) ? h('small', { class: 'faint' }, ' · nå ' + e.now) : null),
+        h('span', { class: 'faint ps' }, bits || (e.photos.length ? countTxt(e.photos.length, 'bilde', 'bilder') : '')),
+        h('span', { class: 'pc' }, countTxt(e.persons.size, 'person', 'personer'))));
+    }))));
+  }
+};
+
+const PlaceView = {
+  mount(root, key){ this.root = root; this.key = key; this.render(); },
+  update(){ this.render(); },
+  unmount(){ if (this.base) { try { this.base.destroy(); } catch (_) {} this.base = null; } },
+  render(){
+    this.unmount();
+    const root = clear(this.root);
+    const back = h('button', { class: 'back', onclick: () => App.go('places') }, ico('back', 18), 'Alle steder');
+    const M = collectPlaces(); const e = M.get(this.key);
+    if (!e){ root.append(back, h('div', { class: 'empty' }, h('h2', null, 'Ingen registrerte hendelser her'), h('p', null, 'Ingen er lenger knyttet til dette stedet.'))); return; }
+    const by = t => e.ev.filter(x => x.type === t);
+    const P = id => Store.persons.get(id);
+    const ageOf = p => p && p.birthYear != null && p.deathYear != null && p.deathYear >= p.birthYear ? p.deathYear - p.birthYear : null;
+    const avg = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length * 10) / 10 : null;
+    const bornAges = [...new Set(by('født').map(x => x.pid))].map(id => ageOf(P(id))).filter(x => x != null);
+    const diedAges = [...new Set(by('døde').map(x => x.pid))].map(id => ageOf(P(id))).filter(x => x != null);
+    const nowNote = e.now && norm(e.now) !== norm(e.title) ? 'Nå en del av ' + e.now : '';
+    const sameNow = [...M.values()].filter(x => x.key !== e.key && ((e.now && x.now && norm(x.now) === norm(e.now)) || (e.now && norm(x.title) === norm(e.now)) || (x.now && norm(x.now) === norm(e.title))));
+    const stat = (n, label) => h('div', { class: 'st-big' }, h('b', null, String(n)), h('span', null, label));
+    const head = h('div', { class: 'page-h' }, h('div', null, h('h1', null, e.title), h('p', null, [nowNote, countTxt(e.persons.size, 'person', 'personer') + ' knyttet til stedet'].filter(Boolean).join(' · '))));
+    root.append(back, head);
+    root.appendChild(h('section', { class: 'card' }, h('div', { class: 'st-bigs' },
+      stat(new Set(by('født').map(x => x.pid)).size, 'født her'), stat(new Set(by('døde').map(x => x.pid)).size, 'døde her'),
+      stat(new Set(by('bodde').map(x => x.pid)).size, 'bodde her'), stat(new Set(by('utvandret').map(x => x.pid)).size, 'utvandret hit')),
+      (bornAges.length || diedAges.length) ? h('p', { class: 'fnote' }, [bornAges.length ? 'Gjennomsnittlig levealder for dem som ble født her: ' + avg(bornAges).toLocaleString('nb-NO') + ' år (' + bornAges.length + ').' : '', diedAges.length ? 'For dem som døde her: ' + avg(diedAges).toLocaleString('nb-NO') + ' år (' + diedAges.length + ').' : ''].filter(Boolean).join(' ')) : null));
+    // kart
+    const pts = [...e.pts.values()];
+    if (pts.length){
+      const host = h('div', { class: 'pick pmap' });
+      const mapCard = h('section', { class: 'card' }, h('h2', null, 'Kart'), host);
+      root.appendChild(mapCard);
+      const base = createBaseMap(host, {}); this.base = base;
+      const pins = pts.map(pt => { const el = h('div', { class: 'pin' }); el.innerHTML = PIN_SVG; if (pt.name){ el.appendChild(h('span', { class: 'pin-l' }, pt.name)); } host.appendChild(el); return { el, pt }; });
+      const place = () => pins.forEach(({ el, pt }) => { const [x, y] = base.toScreen(pt.lon, pt.lat); el.style.left = x + 'px'; el.style.top = y + 'px'; });
+      base.onTransform(place);
+      base.fit(pts.map(pt => [pt.lon, pt.lat]), { minSpan: pts.length > 1 ? 1.2 : 4 });
+      if (e.approx && pts.length === 1 && !pts[0].farm) mapCard.appendChild(h('p', { class: 'fnote' }, 'Punktet er omtrentlig (midt i dagens kommune). Du kan flytte det på en person ved å velge «Flytt på kartet» på stedet.'));
+    }
+    // gårder
+    if (e.farms.size){
+      root.appendChild(h('section', { class: 'card' }, h('h2', null, 'Gårder og steder i kommunen'),
+        h('div', { class: 'farms' }, [...e.farms.values()].sort((a, b) => b.ids.size - a.ids.size || a.name.localeCompare(b.name, 'nb')).map(f => h('div', { class: 'farm' }, h('b', null, f.name), h('div', { class: 'chips' }, [...f.ids].map(P).filter(Boolean).map(p => personChip(p))))))));
+    }
+    // personer etter type
+    const sect = (title, t, verb) => {
+      const arr = by(t).filter(x => x.pid && P(x.pid)).sort((a, b) => (a.year == null) - (b.year == null) || (a.year || 0) - (b.year || 0));
+      if (!arr.length) return null;
+      return h('section', { class: 'card' }, h('h2', null, title, h('span', { class: 'faint an-cnt' }, String(arr.length))),
+        h('ul', { class: 'an-list' }, arr.map(x => h('li', { class: 'an-row' }, h('span', { class: 'an-n pyear' }, x.year != null ? String(x.year) : '–'), personChip(P(x.pid), lifeSpan(P(x.pid))), x.farm ? h('span', { class: 'faint an-pl' }, x.farm) : null))));
+    };
+    [sect('Født her', 'født'), sect('Bodde her', 'bodde'), sect('Utvandret hit', 'utvandret'), sect('Døde her', 'døde')].forEach(c => c && root.appendChild(c));
+    if (e.photos.length) root.appendChild(h('section', { class: 'card' }, h('h2', null, 'Bilder tatt her'), h('div', { class: 'thumbs' }, e.photos.map(ph => h('button', { class: 'thumb', 'aria-label': ph.caption || 'Bilde', onclick: () => Photos.open(ph.id, { list: e.photos.map(x => x.id) }) }, h('img', { src: photoUrl(ph), alt: '', loading: 'lazy', style: ph.w && ph.h ? { aspectRatio: ph.w + '/' + ph.h } : {} }), h('span', { class: 'cap' }, yearLabel(ph) || ph.caption || ' '))))));
+    if (sameNow.length) root.appendChild(h('section', { class: 'card' }, h('h2', null, 'Samme område i dag'), h('p', { class: 'muted', style: { marginTop: 0 } }, 'Disse stedene er i dag en del av samme kommune.'),
+      h('ul', { class: 'plist' }, sameNow.map(x => h('li', null, h('a', { href: '#', class: 'prow', onclick: ev => { ev.preventDefault(); App.go('place', x.key); } }, h('span', { class: 'pt' }, x.title, x.now && norm(x.now) !== norm(x.title) ? h('small', { class: 'faint' }, ' · nå ' + x.now) : null), h('span', { class: 'faint ps' }, ''), h('span', { class: 'pc' }, countTxt(x.persons.size, 'person', 'personer'))))))));
+  }
+};
+
+/* ---------- Verifisering ---------- */
+const VFACTS = [['birth', 'Fødsel'], ['death', 'Død'], ['parents', 'Foreldre'], ['partners', 'Partnere og barn']];
+const V_LABEL = { ok: 'Bekreftet', doubt: 'Usikker', '': 'Ikke bekreftet' };
+const vFacts = p => VFACTS.filter(([k]) => k !== 'death' || isDead(p));
+const vState = (p, k) => (p.verify && p.verify[k] && p.verify[k].st) || '';
+const srcLabel = ph => [ph.srcType || 'Kilde', ph.ref || ph.caption, ph.year].filter(Boolean).join(' · ');
+const allSources = () => [...Store.photos.values()].filter(isSource).sort((a, b) => srcLabel(a).localeCompare(srcLabel(b), 'nb'));
+
+function openVerify(pid){
+  const p0 = Store.persons.get(pid); if (!p0) return;
+  const srcs = allSources();
+  const st = {};
+  vFacts(p0).forEach(([k]) => { const v = (p0.verify && p0.verify[k]) || {}; st[k] = { st: v.st || '', src: new Set(v.src || []), note: v.note || '' }; });
+  const body = h('form', { class: 'modal-b', novalidate: true, onsubmit: async e => {
+    e.preventDefault();
+    const q = clone(Store.persons.get(pid)); q.verify = {};
+    vFacts(q).forEach(([k]) => { const s = st[k]; if (s.st || s.note.trim() || s.src.size) q.verify[k] = { st: s.st || 'doubt', src: [...s.src], note: s.note.trim(), at: new Date().toISOString().slice(0, 10) }; if (q.verify[k] && !s.st) q.verify[k].st = s.st; });
+    Object.keys(q.verify).forEach(k => { if (!q.verify[k].st && !q.verify[k].src.length && !q.verify[k].note) delete q.verify[k]; });
+    if (!Object.keys(q.verify).length) delete q.verify;
+    await Store.savePerson(q); modal.close(); toast('Verifiseringen er lagret');
+  } });
+  body.appendChild(h('p', { class: 'faint', style: { fontSize: '13.5px', margin: '0 0 6px' } }, 'Marker hva du har kontrollert mot en kilde. Det du ikke har sjekket, står som «Ikke bekreftet».'));
+  vFacts(p0).forEach(([k, label]) => {
+    const s = st[k];
+    const sel = h('select', { class: 'inp', 'aria-label': label, onchange: e => { s.st = e.target.value; } }, [['', 'Ikke bekreftet'], ['ok', 'Bekreftet i kilde'], ['doubt', 'Usikker']].map(([v, t]) => h('option', { value: v, selected: s.st === v }, t)));
+    const srcBox = srcs.length ? h('details', { class: 'v-src' }, h('summary', null, 'Kilder (' + s.src.size + ')'),
+      h('div', { class: 'v-srclist' }, srcs.map(ph => h('label', { class: 'bk-chk' }, h('input', { type: 'checkbox', checked: s.src.has(ph.id), onchange: e => { if (e.target.checked) s.src.add(ph.id); else s.src.delete(ph.id); const sm = srcBox.querySelector('summary'); if (sm) sm.textContent = 'Kilder (' + s.src.size + ')'; } }), h('span', null, srcLabel(ph)))))) : h('p', { class: 'faint', style: { fontSize: '13px', margin: 0 } }, 'Ingen kilder er lagt inn ennå (under Bilder, fanen Kilder).');
+    body.appendChild(h('div', { class: 'fs' }, h('h3', null, label), sel, srcBox, h('input', { class: 'inp', type: 'text', placeholder: 'Notat, f.eks. «kirkebok Voss 1872, s. 14»', value: s.note, 'aria-label': 'Notat for ' + label, oninput: e => { s.note = e.target.value; } })));
+  });
+  body.appendChild(h('div', { class: 'form-actions' }, h('span'), h('div', { style: { display: 'flex', gap: '8px' } }, h('button', { type: 'button', class: 'btn ghost', onclick: () => modal.close() }, 'Avbryt'), h('button', { type: 'submit', class: 'btn primary' }, 'Lagre'))));
+  const modal = openModal('Verifiser ' + fullName(p0), body, {});
+}
+
+function verifyCard(p, edit){
+  const facts = vFacts(p);
+  const ok = facts.filter(([k]) => vState(p, k) === 'ok').length;
+  const rows = facts.map(([k, label]) => {
+    const v = (p.verify && p.verify[k]) || {};
+    const srcs = (v.src || []).map(id => Store.photos.get(id)).filter(Boolean);
+    return h('div', { class: 'v-row' }, h('span', { class: 'v-l' }, label), h('span', { class: 'vbadge v-' + (v.st || 'none') }, (v.st === 'ok' ? '✓ ' : v.st === 'doubt' ? '? ' : '') + V_LABEL[v.st || '']),
+      srcs.length || v.note ? h('div', { class: 'v-d' }, srcs.map(ph => h('a', { href: '#', class: 'chip', onclick: e => { e.preventDefault(); Photos.open(ph.id, { list: srcs.map(x => x.id) }); } }, h('span', { class: 't' }, srcLabel(ph)))), v.note ? h('span', { class: 'faint' }, v.note) : null) : null);
+  });
+  return h('section', { class: 'card' }, h('h2', null, 'Verifisering', edit ? h('button', { class: 'btn sm', onclick: () => openVerify(p.id) }, 'Verifiser') : null),
+    h('p', { class: 'muted', style: { margin: '0 0 6px' } }, ok + ' av ' + facts.length + ' opplysninger er bekreftet i kilde.'), rows);
+}
+
+/* ---------- Kvalitetssjekk ---------- */
+function runChecks(){
+  const out = [];
+  const P = [...Store.persons.values()];
+  const nm = fullName;
+  const push = (code, sev, p, msg, other) => out.push({ code, sev, pid: p.id, other: other || null, msg, key: code + (other ? ':' + other : '') });
+  P.forEach(p => {
+    const b = p.birthYear, d = p.deathYear;
+    if (b != null && d != null && d < b) push('dod-for-fodsel', 'feil', p, 'Dødsåret (' + d + ') er før fødselsåret (' + b + ').');
+    if (b != null && d != null && d - b > 110) push('alder', 'advarsel', p, 'Ble ' + (d - b) + ' år. Kontroller årstallene.');
+    if (b != null && d == null && !isDead(p) && NOW_YEAR - b > 110) push('levende-gammel', 'advarsel', p, 'Er ikke registrert som død, men ville vært ' + (NOW_YEAR - b) + ' år.');
+    // foreldre
+    const slots = [[p.fatherId, 'far'], [p.motherId, 'mor'], [p.coParentId, 'medforelder']];
+    slots.forEach(([id, role]) => {
+      const par = id && Store.persons.get(id); if (!par) return;
+      if (id === p.id) return;
+      if (b != null && par.birthYear != null){
+        const gap = b - par.birthYear;
+        if (gap < 15) push('forelder-ung', 'feil', p, nm(par) + ' (' + role + ') var bare ' + gap + ' år da ' + (p.given || 'personen') + ' ble født.', id);
+        else if (!p.adopted && ((role === 'mor' && gap > 48) || (role !== 'mor' && gap > 62))) push('forelder-gammel', 'advarsel', p, nm(par) + ' (' + role + ') var ' + gap + ' år da ' + (p.given || 'personen') + ' ble født.', id);
+      }
+      if (b != null && par.deathYear != null){
+        if (role === 'mor' ? b > par.deathYear : b > par.deathYear + 1) push('fodt-etter-dod', 'feil', p, 'Født ' + b + ', men ' + nm(par) + ' (' + role + ') døde ' + par.deathYear + '.', id);
+      }
+    });
+    // syklus
+    const seen = new Set(); let cyc = false;
+    (function up(i){ const q = Store.persons.get(i); if (!q || cyc) return; parentsOf(q).forEach(x => { if (x === p.id) cyc = true; else if (!seen.has(x)){ seen.add(x); up(x); } }); })(p.id);
+    if (cyc) push('syklus', 'feil', p, 'Er sin egen forfar i slektstreet. Sjekk foreldrene som er lagt inn.');
+    // partnere
+    (p.partners || []).forEach(pt => {
+      const o = Store.persons.get(pt.id); if (!o) return;
+      const kind = relKind(pt);
+      if (pt.year != null){
+        [p, o].forEach(x => { if (x.birthYear != null){ const age = pt.year - x.birthYear; if (age < 0) push('forhold-for-fodsel', 'feil', p, 'Forholdet til ' + nm(o) + ' (' + pt.year + ') starter før ' + nm(x) + ' ble født.', o.id); else if (age < 15 && kind === 'gift') push('gift-ung', 'advarsel', p, nm(x) + ' var ' + age + ' år ved giftermålet med ' + nm(x === p ? o : p) + ' (' + pt.year + ').', o.id); }
+          if (x.deathYear != null && pt.year > x.deathYear) push('forhold-etter-dod', 'feil', p, 'Forholdet til ' + nm(o) + ' (' + pt.year + ') starter etter at ' + nm(x) + ' døde (' + x.deathYear + ').', o.id); });
+        if (pt.endYear != null && pt.endYear < pt.year) push('slutt-for-start', 'feil', p, 'Forholdet til ' + nm(o) + ' slutter (' + pt.endYear + ') før det starter (' + pt.year + ').', o.id);
+      }
+      if (p.birthYear != null && o.birthYear != null && Math.abs(p.birthYear - o.birthYear) > 30 && p.id < o.id) push('stor-aldersforskjell', 'advarsel', p, 'Aldersforskjell på ' + Math.abs(p.birthYear - o.birthYear) + ' år til ' + nm(o) + '.', o.id);
+    });
+    // steder og tid
+    (p.moves || []).forEach(m => { if (m.year == null) return; if (b != null && m.year < b) push('flytt-for-fodsel', 'feil', p, 'Bosted fra ' + m.year + ' er før fødselsåret (' + b + ').', 'm' + m.year); if (d != null && m.year > d) push('flytt-etter-dod', 'feil', p, 'Bosted fra ' + m.year + ' er etter dødsåret (' + d + ').', 'm' + m.year); });
+    if (p.emigratedYear != null){ if (b != null && p.emigratedYear < b) push('utv-for-fodsel', 'feil', p, 'Utvandret ' + p.emigratedYear + ', før fødselsåret (' + b + ').'); if (d != null && p.emigratedYear > d) push('utv-etter-dod', 'feil', p, 'Utvandret ' + p.emigratedYear + ', etter dødsåret (' + d + ').'); }
+    // mangler
+    if (b == null) push('mangler-fodsel', 'mangler', p, 'Fødselsår mangler.');
+    if (p.sex !== 'm' && p.sex !== 'f') push('mangler-kjonn', 'mangler', p, 'Kjønn er ikke oppgitt.');
+    if (!p.fatherId && !p.motherId && !p.coParentId && !p.donorId && !p.adopted) push('mangler-foreldre', 'mangler', p, 'Ingen foreldre er registrert.');
+    const hasSrc = (Idx.photosOf.get(p.id) || []).some(x => isSource(x.photo));
+    if (isDead(p) && !deathCatOf(p)) push('dodsarsak', 'ubekreftet', p, 'Dødsårsak er ikke bekreftet (velg gruppen «Ukjent» hvis den ikke er kjent).');
+    if (!hasSrc) push('mangler-kilde', 'mangler', p, 'Ingen kilde er knyttet til personen.');
+    const unv = vFacts(p).filter(([k]) => vState(p, k) !== 'ok').map(([, l]) => l.toLowerCase());
+    const dbt = vFacts(p).filter(([k]) => vState(p, k) === 'doubt').map(([, l]) => l.toLowerCase());
+    if (dbt.length) push('usikker', 'ubekreftet', p, 'Merket som usikker: ' + dbt.join(', ') + '.');
+    if (unv.length > dbt.length) push('ubekreftet', 'ubekreftet', p, 'Ikke bekreftet i kilde: ' + vFacts(p).filter(([k]) => !vState(p, k)).map(([, l]) => l.toLowerCase()).join(', ') + '.');
+  });
+  // bilder: tagget før fødsel
+  Store.photos.forEach(ph => { if (ph.year == null || isSource(ph)) return; (ph.tags || []).forEach(t => { const p = Store.persons.get(t.pid); if (!p) return; if (p.birthYear != null && ph.year < p.birthYear) out.push({ code: 'bilde-for-fodsel', sev: 'feil', pid: p.id, other: ph.id, msg: 'Er tagget på et bilde fra ' + yearLabel(ph) + ', før fødselsåret (' + p.birthYear + ').', key: 'bilde-for-fodsel:' + ph.id }); else if (p.deathYear != null && ph.year > p.deathYear + 1) out.push({ code: 'bilde-etter-dod', sev: 'advarsel', pid: p.id, other: ph.id, msg: 'Er tagget på et bilde fra ' + yearLabel(ph) + ', etter dødsåret (' + p.deathYear + ').', key: 'bilde-etter-dod:' + ph.id }); }); });
+  // mulige dubletter
+  const groups = new Map();
+  P.forEach(p => { const k = norm([p.given, p.patronym, p.family].filter(Boolean).join(' ')); if (!k) return; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); });
+  groups.forEach(g => { for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++){ const a = g[i], c = g[j];
+    if (a.birthYear != null && c.birthYear != null && Math.abs(a.birthYear - c.birthYear) > 2) continue;
+    const [x, y] = a.id < c.id ? [a, c] : [c, a];
+    out.push({ code: 'dublett', sev: 'advarsel', pid: x.id, other: y.id, msg: 'Kan være samme person som ' + fullName(y) + (y.birthYear != null ? ' (f. ' + y.birthYear + ')' : '') + '.', key: 'dublett:' + y.id }); } });
+  return out;
+}
+
+const Q_SEV = [['feil', 'Feil', 'Ting som ikke kan stemme'], ['advarsel', 'Advarsler', 'Uvanlig eller verdt å sjekke'], ['ubekreftet', 'Ubekreftet', 'Ikke kontrollert mot kilde'], ['mangler', 'Mangler', 'Opplysninger som ikke er lagt inn']];
+const QualityView = {
+  show: new Set(['feil', 'advarsel']), showIgnored: false, limit: {}, code: null,
+  mount(root){ this.root = root; this.render(); },
+  update(){ this.render(); },
+  render(){
+    const root = clear(this.root);
+    const back = h('button', { class: 'back', onclick: () => App.go('register') }, ico('back', 18), 'Register');
+    root.append(back, h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Kvalitetssjekk'), h('p', null, 'Appen går gjennom registeret og peker på det som ikke stemmer eller mangler. Alt er forslag. Du bestemmer selv hva som er riktig, og kan ignorere det som er greit.'))));
+    if (!Store.persons.size){ root.appendChild(h('div', { class: 'empty' }, h('p', null, 'Legg inn personer først.'))); return; }
+    const all = runChecks();
+    const ign = x => { const p = Store.persons.get(x.pid); return !!(p && (p.ignored || []).includes(x.key)); };
+    const live = all.filter(x => !ign(x)), ignored = all.filter(ign);
+    const count = s => live.filter(x => x.sev === s).length;
+    // verifisering: oppsummering
+    const tot = [...Store.persons.values()].reduce((a, p) => { const f = vFacts(p); a.t += f.length; a.ok += f.filter(([k]) => vState(p, k) === 'ok').length; return a; }, { t: 0, ok: 0 });
+    root.appendChild(h('section', { class: 'card' }, h('div', { class: 'q-chips' }, Q_SEV.map(([k, t, sub]) => h('button', { type: 'button', class: 'q-chip q-' + k, 'aria-pressed': String(this.show.has(k)), onclick: () => { if (this.show.has(k)) this.show.delete(k); else this.show.add(k); this.render(); } }, h('b', null, String(count(k))), h('span', null, t), h('small', null, sub)))),
+      h('p', { class: 'fnote' }, 'Verifisering: ' + tot.ok + ' av ' + tot.t + ' opplysninger er bekreftet i kilde (' + (tot.t ? Math.round(tot.ok / tot.t * 100) : 0) + ' %). Du verifiserer på hver persons side. '),
+      ignored.length ? h('label', { class: 'bk-chk' }, h('input', { type: 'checkbox', checked: this.showIgnored, onchange: e => { this.showIgnored = e.target.checked; this.render(); } }), h('span', null, 'Vis ' + ignored.length + ' ignorerte')) : null));
+    const list = (this.showIgnored ? all : live);
+    Q_SEV.forEach(([k, t]) => {
+      if (!this.show.has(k)) return;
+      const items = list.filter(x => x.sev === k).sort((a, b) => a.code.localeCompare(b.code) || fullName(Store.persons.get(a.pid)).localeCompare(fullName(Store.persons.get(b.pid)), 'nb'));
+      if (!items.length) return;
+      const lim = this.limit[k] || 40;
+      root.appendChild(h('section', { class: 'card' }, h('h2', null, t, h('span', { class: 'faint an-cnt' }, String(items.length))),
+        h('ul', { class: 'q-list' }, items.slice(0, lim).map(x => {
+          const p = Store.persons.get(x.pid), o = x.other && Store.persons.get(x.other);
+          const isI = ign(x);
+          return h('li', { class: 'q-row' + (isI ? ' ign' : '') }, personChip(p, lifeSpan(p)), h('span', { class: 'q-m' }, x.msg), o ? personChip(o, lifeSpan(o)) : null,
+            h('span', { class: 'q-a' }, h('button', { class: 'btn sm ghost', onclick: () => App.go('person', p.id) }, 'Åpne'),
+              Store.canWrite ? h('button', { class: 'btn sm ghost', onclick: async () => { const q = clone(Store.persons.get(x.pid)); const set = new Set(q.ignored || []); if (isI) set.delete(x.key); else set.add(x.key); q.ignored = [...set]; if (!q.ignored.length) delete q.ignored; await Store.savePerson(q); } }, isI ? 'Gjenopprett' : 'Ignorer') : null));
+        })),
+        items.length > lim ? h('button', { class: 'btn sm', style: { marginTop: '8px' }, onclick: () => { this.limit[k] = lim + 80; this.render(); } }, 'Vis flere (' + (items.length - lim) + ')') : null));
+    });
+    if (![...this.show].some(k => list.some(x => x.sev === k))) root.appendChild(h('div', { class: 'card' }, h('p', { class: 'muted' }, 'Ingenting å vise for valget ditt. Det er et godt tegn.')));
   }
 };
 
@@ -3113,7 +3485,7 @@ async function composeBook(o, inc){
         if (b) rows.push(['Født', b]);
         if (p.emigratedTo) rows.push(['Utvandret til', [p.emigratedYear != null ? String(p.emigratedYear) : null, placeName(p.emigratedTo)].filter(Boolean).join(' · ')]);
         if (d) rows.push(['Død', d]);
-        if (p.deathCause) rows.push(['Dødsårsak', p.deathCause]);
+        { const dc = deathCatOf(p), ds = deathSpecOf(p); if (dc || ds) rows.push(['Dødsårsak', dc && ds ? dc + ' (' + ds + ')' : (dc || ds)]); }
         if (rows.length) B(h('dl', { class: 'bk-facts' }, rows.map(([k, v]) => [h('dt', null, k), h('dd', null, v)])));
       }
       if (o.family){
@@ -3424,11 +3796,11 @@ const BookView = {
 /* ====== Appskall ====== */
 const App = {
   view: 'register', arg: null, cur: null,
-  views: { register: RegisterView, person: PersonView, tree: TreeView, map: MapView, photos: Photos, ancestors: AncestorsView, descendants: DescendantsView, book: BookView, stats: StatsView, kinship: KinshipView },
-  tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
+  views: { register: RegisterView, person: PersonView, tree: TreeView, map: MapView, photos: Photos, ancestors: AncestorsView, descendants: DescendantsView, book: BookView, stats: StatsView, kinship: KinshipView, places: PlacesView, place: PlaceView, quality: QualityView },
+  tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', places: 'register', place: 'register', quality: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
-    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '25.10 09:18')); } catch (_) {}
+    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '25.10 10:37')); } catch (_) {}
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
@@ -3441,7 +3813,7 @@ const App = {
     let v = 'register', a = null;
     try {
       const hs = (location.hash || '').replace('#', '');
-      if (hs === 'tre') v = 'tree'; else if (hs === 'kart') v = 'map'; else if (hs === 'bilder') v = 'photos'; else if (hs === 'bok') v = 'book'; else if (hs === 'statistikk') v = 'stats'; else if (hs === 'slektskap') v = 'kinship';
+      if (hs === 'tre') v = 'tree'; else if (hs === 'kart') v = 'map'; else if (hs === 'bilder') v = 'photos'; else if (hs === 'bok') v = 'book'; else if (hs === 'statistikk') v = 'stats'; else if (hs === 'slektskap') v = 'kinship'; else if (hs === 'steder') v = 'places'; else if (hs === 'kvalitet') v = 'quality'; else if (hs.startsWith('sted-')){ v = 'place'; try { a = decodeURIComponent(hs.slice(5)); } catch (_) { a = hs.slice(5); } }
       else if (hs.startsWith('aner-')){ v = 'ancestors'; a = hs.slice(5); } else if (hs.startsWith('etterkommere-')){ v = 'descendants'; a = hs.slice(13); }
       else if (hs.startsWith('p-')){ v = 'person'; a = hs.slice(2); }
     } catch (_) {}
