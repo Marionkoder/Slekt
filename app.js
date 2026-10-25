@@ -206,7 +206,7 @@ function searchPlaces(q, limit = 8, o = {}){
 }
 
 /* Biologiske foreldre: far, mor og donor. Medforelder (juridisk, ikke biologisk) og steforeldre er ikke med. */
-const bioParentsOf = p => [p.fatherId, p.motherId, p.donorId].filter((x, i, a) => x && a.indexOf(x) === i);
+const bioParentsOf = p => (p.adopted ? [p.bioFatherId, p.bioMotherId] : [p.fatherId, p.motherId, p.donorId]).filter((x, i, a) => x && a.indexOf(x) === i);
 /* Alle i biologisk slekt med person id: forfedre, og alle etterkommere av forfedrene (søsken, onkler, tanter, søskenbarn …), inkludert personen selv. */
 function bioRelatives(id){
   const kidsOf = new Map();
@@ -216,6 +216,16 @@ function bioRelatives(id){
   const out = new Set();
   (function down(i){ if (out.has(i)) return; out.add(i); (kidsOf.get(i) || []).forEach(down); })(id);
   anc.forEach(a => (function d(i){ if (out.has(i)) return; out.add(i); (kidsOf.get(i) || []).forEach(d); })(a));
+  return out;
+}
+
+/* Rett linje: personen selv, alle biologiske forfedre og alle biologiske etterkommere (ikke søsken, onkler osv.). */
+function bioLine(id){
+  const kidsOf = new Map();
+  Store.persons.forEach(p => bioParentsOf(p).forEach(pid => { if (!kidsOf.has(pid)) kidsOf.set(pid, []); kidsOf.get(pid).push(p.id); }));
+  const out = new Set();
+  (function up(i){ if (out.has(i)) return; const p = Store.persons.get(i); if (!p) return; out.add(i); bioParentsOf(p).forEach(up); })(id);
+  (function down(i){ (kidsOf.get(i) || []).forEach(k => { if (!out.has(k)){ out.add(k); down(k); } }); })(id);
   return out;
 }
 
@@ -249,9 +259,9 @@ const relShort = x => { const k = relKind(x); if (k === 'foreldre') return ''; c
 
 /* ====== Datalag ====== */
 const Idx = {
-  kids: new Map(), donorKids: new Map(), partners: new Map(), photosOf: new Map(),
+  kids: new Map(), donorKids: new Map(), adoptOutKids: new Map(), partners: new Map(), photosOf: new Map(),
   rebuild(){
-    this.kids.clear(); this.donorKids.clear(); this.partners.clear(); this.photosOf.clear();
+    this.kids.clear(); this.donorKids.clear(); this.adoptOutKids.clear(); this.partners.clear(); this.photosOf.clear();
     const addP = (a, b, year, kind, ex) => {
       if (!Store.persons.has(a) || !Store.persons.has(b) || a === b) return;
       if (!this.partners.has(a)) this.partners.set(a, new Map());
@@ -262,6 +272,7 @@ const Idx = {
     Store.persons.forEach(p => {
       parentsOf(p).forEach(pid => { if (Store.persons.has(pid)){ if (!this.kids.has(pid)) this.kids.set(pid, []); this.kids.get(pid).push(p.id); } });
       if (p.donorId && Store.persons.has(p.donorId)){ if (!this.donorKids.has(p.donorId)) this.donorKids.set(p.donorId, []); this.donorKids.get(p.donorId).push(p.id); }
+      if (p.adopted) [p.bioFatherId, p.bioMotherId].forEach(bid => { if (bid && Store.persons.has(bid)){ if (!this.adoptOutKids.has(bid)) this.adoptOutKids.set(bid, []); this.adoptOutKids.get(bid).push(p.id); } });
       const pp = parentPair(p);
       if (pp[0] && pp[1]){ addP(pp[0], pp[1], null, 'foreldre'); addP(pp[1], pp[0], null, 'foreldre'); }
       (p.partners || []).forEach(pt => { addP(p.id, pt.id, pt.year, relKind(pt), pt); addP(pt.id, p.id, pt.year, relKind(pt), pt); });
@@ -1122,6 +1133,7 @@ function openPersonForm(opts = {}){
   const editing = !!opts.person;
   const f = editing ? clone(opts.person) : Object.assign({ id: uid(), given: '', family: '', sex: 'u', birthYear: null, birthDate: '', birthPlace: null, deathYear: null, deathDate: '', deathPlace: null, fatherId: null, motherId: null, coParentId: null, donorId: null, deceased: false, partners: [], moves: [], notes: '', created: Date.now() }, clone(opts.preset || {}));
   f.partners = f.partners || []; f.moves = f.moves || [];
+  if (f.donorId) f.donorConceived = true;
   const incoming = [];
   if (editing){
     Store.persons.forEach(o => (o.partners || []).forEach(pt => { if (pt.id === f.id){ incoming.push(o.id); if (!f.partners.some(x => x.id === o.id)) f.partners.push({ id: o.id, year: pt.year == null ? null : pt.year, kind: pt.kind, endYear: pt.endYear, divorced: pt.divorced }); } }));
@@ -1196,9 +1208,16 @@ function openPersonForm(opts = {}){
   });
   const saveBtn = h('button', { type: 'submit', class: 'btn primary' }, 'Lagre');
   const donorWrap = fld('Donor', parentField('donor'), 'half-m');
+  const bioField = (role, slot, label) => personField({ role, label, ref: selfRef, value: f[slot], empty: 'Ukjent. Velg eller opprett …', onChange: v => { f[slot] = v; },
+    exclude: () => [f.fatherId, f.motherId, f.coParentId, f.bioFatherId, f.bioMotherId].filter(Boolean), preset: () => (role === 'father' ? { sex: 'm' } : { sex: 'f' }) });
+  const adoptYear = h('input', { class: 'inp', type: 'number', inputmode: 'numeric', placeholder: 'Adopsjonsår (valgfritt)', value: f.adoptYear != null ? f.adoptYear : '', 'aria-label': 'Adopsjonsår', oninput: e => f.adoptYear = intOrNull(e.target.value) });
+  const adoptWrap = h('div', { class: 'fgrid adopt-wrap' }, fld('Adopsjonsår', adoptYear, 'full'), fld('Biologisk far', bioField('father', 'bioFatherId', 'Biologisk far'), 'half-m'), fld('Biologisk mor', bioField('mother', 'bioMotherId', 'Biologisk mor'), 'half-m'),
+    h('p', { class: 'faint full', style: { fontSize: '13px', margin: '0' } }, 'Når personen er adoptert, er Far, Mor og Medforelder over de juridiske (adoptive) foreldrene. Her kan du legge inn de biologiske foreldrene hvis de er kjent.'));
+  const donorChk = h('label', { class: 'bk-chk', for: 'f-donorchild' }, h('input', { type: 'checkbox', id: 'f-donorchild', checked: !!f.donorConceived, onchange: e => { f.donorConceived = e.target.checked; donorUpd(); } }), h('span', null, 'Donorbarn', h('small', null, 'Vis feltet for donor.')));
+  const adoptChk = h('label', { class: 'bk-chk', for: 'f-adopted' }, h('input', { type: 'checkbox', id: 'f-adopted', checked: !!f.adopted, onchange: e => { f.adopted = e.target.checked; donorUpd(); } }), h('span', null, 'Adoptert', h('small', null, 'Vis felt for adopsjon og biologiske foreldre.')));
   const patWrap = fld('Patronym (valgfritt)', patInp, 'full');
   const patUpd = () => { patWrap.style.display = ((f.birthYear != null && f.birthYear < 1900) || (f.patronym || '').trim()) ? '' : 'none'; };
-  const donorUpd = () => { donorWrap.style.display = ((f.birthYear != null && f.birthYear < 1970) && !f.donorId) ? 'none' : ''; };
+  const donorUpd = () => { donorChk.style.display = ((f.birthYear != null && f.birthYear < 1970) && !f.donorConceived) ? 'none' : ''; donorWrap.style.display = f.donorConceived ? '' : 'none'; adoptWrap.style.display = f.adopted ? '' : 'none'; };
   patUpd(); donorUpd();
   const form = h('form', { class: 'modal-b', novalidate: true, oninput: () => { patUpd(); donorUpd(); }, onsubmit: async e => {
     e.preventDefault();
@@ -1215,6 +1234,9 @@ function openPersonForm(opts = {}){
     if (o.motherId === o.id) o.motherId = null;
     if (o.coParentId === o.id) o.coParentId = null;
     if (o.donorId === o.id) o.donorId = null;
+    if (!o.donorConceived){ delete o.donorId; delete o.donorConceived; } else if (!o.donorId) o.donorConceived = true;
+    if (!o.adopted){ delete o.adopted; delete o.adoptYear; delete o.bioFatherId; delete o.bioMotherId; }
+    else { if (o.adoptYear == null) delete o.adoptYear; if (!o.bioFatherId || o.bioFatherId === o.id) delete o.bioFatherId; if (!o.bioMotherId || o.bioMotherId === o.id) delete o.bioMotherId; }
     if (!o.coParentId) delete o.coParentId; if (!o.donorId) delete o.donorId;
     if (!o.deceased || o.deathYear != null) delete o.deceased;
     o.deathCause = (o.deathCause || '').trim(); if (!o.deathCause || !(o.deceased || o.deathYear != null || (o.deathDate || '').trim() || o.deathPlace)) delete o.deathCause;
@@ -1243,6 +1265,7 @@ function openPersonForm(opts = {}){
     h('div', { class: 'fs' }, h('h3', null, 'Foreldre'),
       h('div', { class: 'fgrid' }, fld('Far', parentField('father'), 'half-m'), fld('Mor', parentField('mother'), 'half-m'),
         fld('Medforelder', parentField('coparent'), 'half-m'), donorWrap),
+      h('div', { class: 'chkrow' }, donorChk, adoptChk), adoptWrap,
       h('p', { class: 'faint', style: { fontSize: '13px', margin: '6px 0 0' } }, 'Medforelder er den andre juridiske forelderen når foreldrene har samme kjønn, for eksempel medmor eller medfar. Donor er den biologiske forelderen som ikke er juridisk forelder, for eksempel sæddonor, eggdonor eller surrogat.')),
     h('div', { class: 'fs' }, h('h3', null, 'Partnere'), partnersBox),
     h('div', { class: 'fs' }, h('h3', null, 'Barn og søsken'),
@@ -1439,6 +1462,7 @@ const PersonView = {
     const row = (k, v) => { if (v) facts.append(h('dt', null, k), h('dd', null, v)); };
     row('Født som', p.birthName || '');
     row('Patronym', p.patronym || '');
+    if (p.adopted) row('Adoptert', p.adoptYear != null ? 'Ja, ' + p.adoptYear : 'Ja');
     row('Født', [p.birthYear != null ? String(p.birthYear) : null, p.birthDate, p.birthPlace && pn(p.birthPlace)].filter(Boolean).join(' · '));
     row('Dødsårsak', p.deathCause || '');
     row('Død', [p.deathYear != null ? String(p.deathYear) : null, p.deathDate, p.deathPlace && pn(p.deathPlace)].filter(Boolean).join(' · ') || (isDead(p) ? 'Ja, tidspunkt ukjent' : ''));
@@ -1451,7 +1475,9 @@ const PersonView = {
     const parents = parentsOf(p).map(i => Store.persons.get(i)).filter(Boolean);
     const stepPar = Idx.stepParentsOf(p), stepKids = Idx.stepKidsOf(p);
     const donor = p.donorId && Store.persons.get(p.donorId);
-    const donorOk = !(p.birthYear != null && p.birthYear < 1970) || !!p.donorId;
+    const donorOk = !!(p.donorConceived || p.donorId);
+    const bioPar = p.adopted ? [p.bioFatherId, p.bioMotherId].map(i => i && Store.persons.get(i)).filter(Boolean) : [];
+    const adoptOut = (Idx.adoptOutKids.get(p.id) || []).map(i => Store.persons.get(i)).filter(Boolean);
     const donorKids = (Idx.donorKids.get(p.id) || []).map(i => Store.persons.get(i)).filter(Boolean);
     const partners = Idx.partnersOf(p.id), kids = Idx.kidsOf(p.id), sibs = Idx.siblingsOf(p);
     const grp = (title, nodes, adds, none) => h('div', null, h('h3', null, title), h('div', { class: 'chips' }, nodes, edit ? adds : null), none || null);
@@ -1505,11 +1531,12 @@ const PersonView = {
         onNew: () => openPersonForm({ title: 'Nytt søsken', preset: { fatherId: p.fatherId || null, motherId: p.motherId || null, coParentId: p.coParentId || null, donorId: p.donorId || null, family: p.family || '' } }) });
     };
     const fam = h('section', { class: 'card' }, h('h2', null, 'Familie'), h('div', { class: 'fam' },
-      grp('Foreldre', [parents.map(x => personChip(x, x.id === p.fatherId ? 'far' : x.id === p.motherId ? 'mor' : 'medforelder')), donor ? personChip(donor, 'donor') : null],
+      grp('Foreldre', [parents.map(x => personChip(x, p.adopted ? (x.id === p.fatherId ? 'adoptivfar' : x.id === p.motherId ? 'adoptivmor' : 'adoptivforelder') : (x.id === p.fatherId ? 'far' : x.id === p.motherId ? 'mor' : 'medforelder'))), bioPar.map(x => personChip(x, x.id === p.bioFatherId ? 'biologisk far' : 'biologisk mor')), donor ? personChip(donor, 'donor') : null],
         parents.length >= 2 ? [!p.donorId && donorOk ? addBtn('Donor', () => addParent('donor')) : null]
           : [!p.fatherId ? addBtn('Far', () => addParent('father')) : null, !p.motherId ? addBtn('Mor', () => addParent('mother')) : null, addBtn('Medforelder', () => addParent('coparent')), !p.donorId && donorOk ? addBtn('Donor', () => addParent('donor')) : null]),
       grp('Partner', partners.map(x => personChip(x.p, relShort(x))), addBtn('Partner', addPartner)),
       grp('Barn', kids.map(x => personChip(x, x.birthYear != null ? 'f. ' + x.birthYear : '')), addBtn('Barn', addChild), noneBox('noKids', 'Ingen kjente barn', kids.length)),
+      adoptOut.length ? grp('Bortadopterte barn', adoptOut.map(x => personChip(x, x.birthYear != null ? 'f. ' + x.birthYear : '')), null) : null,
       donorKids.length ? grp('Donorbarn', donorKids.map(x => personChip(x, x.birthYear != null ? 'f. ' + x.birthYear : '')), null) : null,
       grp('Søsken', sibs.map(x => { const k = Idx.siblingKind(p, x); const donorShared = !!p.donorId && p.donorId === x.donorId; return personChip(x, [x.birthYear != null ? 'f. ' + x.birthYear : '', k === 'hel' && (donorShared || p.donorId || x.donorId) ? 'helsøsken' : k === 'halv' ? 'halvsøsken' : '', donorShared ? 'samme donor' : ''].filter(Boolean).join(' · ')); }), addBtn('Søsken', addSibling), noneBox('noSiblings', 'Ingen kjente søsken', sibs.length)),
       stepPar.length ? grp('Steforeldre', stepPar.map(x => personChip(x.p, 'partner til ' + (x.via.given || fullName(x.via)))), null) : null,
@@ -1584,7 +1611,7 @@ function treeSet(mode, fid){
 }
 
 const TreeView = {
-  mode: 'all', focus: null, sel: null, T: null,
+  mode: 'all', focus: null, sel: null, T: null, cdown: new Set(), cup: new Set(), _key: '',
   mount(root, arg){
     this.root = root; this.T = null; this.needFit = false; this.dim = null;
     if (arg && Store.persons.has(arg)){ this.focus = arg; this.sel = arg; this.mode = 'line'; this.refit = true; }
@@ -1592,7 +1619,9 @@ const TreeView = {
     this.seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Visning' }, modes.map(([k, t]) => h('button', { type: 'button', 'data-m': k, onclick: () => { this.mode = k; if (k !== 'all' && !Store.persons.has(this.focus)) this.focus = this.defaultFocus(); this.refit = true; this.update(); } }, t)));
     this.focusSel = h('select', { class: 'inp', style: { width: 'auto', maxWidth: '100%' }, 'aria-label': 'Utgangsperson', onchange: e => { this.focus = e.target.value; this.sel = this.focus; if (this.mode === 'all') this.mode = 'line'; this.refit = true; this.update(); } });
     this.head = h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Slektstre'), this.sub = h('p', null, '')));
-    this.tools = h('div', { class: 'tools' }, this.seg, this.focusSel);
+    this.openAll = h('button', { type: 'button', class: 'btn sm', onclick: () => { this.cdown.clear(); this.cup.clear(); this.update(); } }, 'Åpne alle grener');
+    this.closeAll = h('button', { type: 'button', class: 'btn sm', onclick: () => { this.closeBranches(); } }, 'Lukk grener');
+    this.tools = h('div', { class: 'tools' }, this.seg, this.focusSel, this.openAll, this.closeAll);
     this.wrap = h('div', { class: 'treewrap' });
     this.svg = h('svg', { role: 'img', 'aria-label': 'Slektstre' });
     this.gv = h('g');
@@ -1650,16 +1679,44 @@ const TreeView = {
       return;
     }
     this.wrap.style.display = ''; this.tools.style.display = '';
-    const set = treeSet(this.mode, this.focus);
-    this.sub.textContent = plural(set.size, 'person', 'personer') + ' vises. Dra for å flytte, klyp eller rull for å zoome, trykk på en person for mer.';
+    const key = this.mode + '|' + this.focus;
+    if (key !== this._key){ this._key = key; this.cdown.clear(); this.cup.clear(); }
+    const full = treeSet(this.mode, this.focus);
+    const set = this.visibleSet(full);
+    this.full = full;
+    this.sub.textContent = plural(set.size, 'person', 'personer') + ' vises' + (set.size < full.size ? ' av ' + full.size : '') + '. Dra for å flytte, klyp eller rull for å zoome, trykk på en person for mer. Bruk + og − på kortene for å åpne og lukke grener.';
     this.draw(set);
     if (this.refit){ this.refit = false; this.fit(); }
     this.info();
   },
+  kidsIn(id, set){ return (Idx.kids.get(id) || []).filter(k => set.has(k)); },
+  parentsIn(id, set){ const p = Store.persons.get(id); return p ? parentsOf(p).filter(x => set.has(x)) : []; },
+  descOf(id, set){ const out = new Set(); const go = i => this.kidsIn(i, set).forEach(k => { if (!out.has(k)){ out.add(k); go(k); } }); go(id); return out; },
+  ancOf(id, set){ const out = new Set(); const go = i => this.parentsIn(i, set).forEach(k => { if (!out.has(k)){ out.add(k); go(k); } }); go(id); return out; },
+  visibleSet(full){
+    const hide = new Set();
+    this.cdown.forEach(id => { if (!full.has(id)) return; this.descOf(id, full).forEach(d => hide.add(d)); });
+    this.cup.forEach(id => { if (!full.has(id)) return; this.ancOf(id, full).forEach(d => hide.add(d)); });
+    // ektefeller som bare henger på skjulte personer skjules også
+    let ch = true;
+    while (ch){ ch = false;
+      full.forEach(id => { if (hide.has(id)) return; const ps = Idx.partnersOf(id).filter(x => full.has(x.p.id)); if (!ps.length) return;
+        if (!ps.some(x => hide.has(x.p.id))) return;
+        const hasOwn = this.parentsIn(id, full).some(x => !hide.has(x)) || this.kidsIn(id, full).some(x => !hide.has(x)) || ps.some(x => !hide.has(x.p.id)) || id === this.focus || id === this.sel;
+        if (!hasOwn){ hide.add(id); ch = true; } });
+    }
+    hide.delete(this.focus);
+    return new Set([...full].filter(id => !hide.has(id)));
+  },
+  closeBranches(){
+    const full = treeSet(this.mode, this.focus); this.cdown.clear(); this.cup.clear();
+    full.forEach(id => { if (this.kidsIn(id, full).length && this.parentsIn(id, full).length) this.cdown.add(id); });
+    this.update(); this.fit();
+  },
   draw(set){
-    const CW = 208, CH = 70;
+    const CW = 224, CH = 76;
     const g = new dagre.graphlib.Graph();
-    g.setGraph({ rankdir: 'TB', nodesep: 20, ranksep: 48, marginx: 24, marginy: 24 });
+    g.setGraph({ rankdir: 'TB', nodesep: 24, ranksep: 64, marginx: 24, marginy: 24 });
     g.setDefaultEdgeLabel(() => ({}));
     set.forEach(id => g.setNode('p' + id, { width: CW, height: CH, kind: 'p', id }));
     const unions = new Map();
@@ -1689,6 +1746,27 @@ const TreeView = {
       card.addEventListener('click', act);
       card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); act(); } });
       ng.appendChild(h('foreignObject', { x: n.x - CW / 2, y: n.y - CH / 2, width: CW, height: CH }, card));
+      const full = this.full || set;
+      const mkBtn = (cx, cy, collapsed, count, label, onclick) => {
+        const gb = h('g', { class: 'tgl' + (collapsed ? ' closed' : ''), role: 'button', tabindex: 0, 'aria-label': label, transform: 'translate(' + cx + ',' + cy + ')' });
+        const txt = collapsed ? '+' + count : '−';
+        const w = collapsed ? Math.max(24, 12 + txt.length * 8) : 24;
+        gb.append(h('rect', { x: -w / 2, y: -11, width: w, height: 22, rx: 11 }), h('text', { x: 0, y: 5, 'text-anchor': 'middle' }, txt));
+        gb.addEventListener('click', e => { e.stopPropagation(); onclick(); });
+        gb.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); onclick(); } });
+        gb.addEventListener('pointerdown', e => e.stopPropagation());
+        ng.appendChild(gb);
+      };
+      const kidsAll = this.kidsIn(n.id, full);
+      if (kidsAll.length){
+        const closed = this.cdown.has(n.id), cnt = this.descOf(n.id, full).size;
+        mkBtn(n.x, n.y + CH / 2 + 2, closed, cnt, (closed ? 'Åpne' : 'Lukk') + ' etterkommere av ' + fullName(p), () => { if (closed) this.cdown.delete(n.id); else this.cdown.add(n.id); this.update(); });
+      }
+      const parsAll = this.parentsIn(n.id, full);
+      if (parsAll.length){
+        const closed = this.cup.has(n.id), cnt = this.ancOf(n.id, full).size;
+        mkBtn(n.x, n.y - CH / 2 - 2, closed, cnt, (closed ? 'Åpne' : 'Lukk') + ' aner til ' + fullName(p), () => { if (closed) this.cup.delete(n.id); else this.cup.add(n.id); this.update(); });
+      }
     });
     this.gv.append(eg, ng);
     if (this.T) this.gv.setAttribute('transform', this.T.toString());
@@ -2299,7 +2377,7 @@ const Photos = {
     const caption = h('input', { class: 'inp', type: 'text', placeholder: 'Bildetekst, f.eks. «Familien samlet på Haugen»', 'aria-label': 'Bildetekst', onchange: e => save({ caption: e.target.value }) });
     const refInp = h('input', { class: 'inp', type: 'text', placeholder: 'f.eks. Voss prestearkiv, klokkerbok 1866, s. 42', 'aria-label': 'Kildehenvisning', onchange: e => save({ ref: e.target.value }) });
     const typeSel = h('select', { class: 'inp', 'aria-label': 'Type kilde', onchange: e => save({ srcType: e.target.value }) }, SOURCE_TYPES.map(t => h('option', { value: t }, t)));
-    const year = h('input', { class: 'inp', type: 'number', inputmode: 'numeric', placeholder: 'Årstall', 'aria-label': 'Årstall for bildet', style: { maxWidth: '170px' }, onchange: e => { const p = photo(); if (p && !isSource(p)){ const r = parsePhotoYear(e.target.value); save({ year: r.year, decade: r.decade || undefined }); } else save({ year: intOrNull(e.target.value) }); } });
+    const year = h('input', { class: 'inp', type: 'text', inputmode: 'numeric', placeholder: 'Årstall', 'aria-label': 'Årstall for bildet', style: { maxWidth: '170px' }, onchange: e => { const p = photo(); if (p && !isSource(p)){ const r = parsePhotoYear(e.target.value); save({ year: r.year, decade: r.decade || undefined }); } else save({ year: intOrNull(e.target.value) }); } });
     const nav = h('div', { class: 'pvnav' });
     const photo = () => Store.photos.get(cur);
     const addPageIn = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true, onchange: async e => {
@@ -2317,7 +2395,7 @@ const Photos = {
       return w;
     }
     async function save(patch){ const p = photo(); if (!p) return; await Store.savePhoto(Object.assign(clone(p), patch)); }
-    function loadFields(){ const p = photo(); caption.value = p ? (p.caption || '') : ''; { const ph = p && !isSource(p); year.type = ph ? 'text' : 'number'; year.placeholder = ph ? 'f.eks. 1950 eller 1950-tallet' : 'Årstall'; year.style.maxWidth = ph ? '230px' : '130px'; year.value = p && p.year != null ? (ph ? yearLabel(p) : p.year) : ''; } refInp.value = p ? (p.ref || '') : ''; typeSel.value = p && p.srcType ? p.srcType : 'Kirkebok'; caption.disabled = year.disabled = refInp.disabled = typeSel.disabled = !Store.canWrite; }
+    function loadFields(){ const p = photo(); caption.value = p ? (p.caption || '') : ''; { const ph = p && !isSource(p); year.setAttribute('inputmode', ph ? 'text' : 'numeric'); year.placeholder = ph ? 'f.eks. 1950 eller 1950-tallet' : 'Årstall'; year.style.maxWidth = ph ? '230px' : '130px'; year.value = p && p.year != null ? (ph ? yearLabel(p) : p.year) : ''; } refInp.value = p ? (p.ref || '') : ''; typeSel.value = p && p.srcType ? p.srcType : 'Kirkebok'; caption.disabled = year.disabled = refInp.disabled = typeSel.disabled = !Store.canWrite; }
     async function addTag(pid, pt){
       const p = photo(); if (!p) return;
       const q = clone(p); const tg = { pid, x: pt.x == null ? null : +pt.x.toFixed(4), y: pt.y == null ? null : +pt.y.toFixed(4) }; if (pg > 0 && tg.x != null) tg.pg = pg;
@@ -2552,14 +2630,14 @@ const DescendantsView = {
 
 /* ====== Statistikk ====== */
 const StatsView = {
-  period: 'all', complete: true, rel: null,
+  period: 'all', complete: true, rel: null, relMode: 'all',
   mount(root){ this.root = root; this.render(); },
   update(){ this.render(); },
   render(){
     const root = clear(this.root);
     const PER = [['all', 'Hele slekten', null], ['p0', 'Født før 1800', [-9999, 1799]], ['p1', '1800–1849', [1800, 1849]], ['p2', '1850–1899', [1850, 1899]], ['p3', '1900–1949', [1900, 1949]], ['p4', '1950 og senere', [1950, 9999]]];
     const per = PER.find(x => x[0] === this.period) || PER[0];
-    const relSet = this.rel && Store.persons.has(this.rel) ? bioRelatives(this.rel) : null;
+    const relSet = this.rel && Store.persons.has(this.rel) ? (this.relMode === 'line' ? bioLine(this.rel) : bioRelatives(this.rel)) : null;
     const all = [...Store.persons.values()].filter(p => !relSet || relSet.has(p.id));
     if (!all.length){ root.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Statistikk'))), h('div', { class: 'empty' }, h('p', null, 'Legg inn personer for å se statistikk.'))); return; }
     const inPeriod = p => !per[2] || (p.birthYear != null && p.birthYear >= per[2][0] && p.birthYear <= per[2][1]);
@@ -2616,6 +2694,16 @@ const StatsView = {
     const firstCard = ageCard('Alder ved første barns fødsel', ys => Math.min(...ys), 'Personer med minst ett barn med fødselsår. Aldre under 10 og over 80 regnes som feil og utelates.');
     const lastCard = ageCard('Alder ved yngste barns fødsel', ys => Math.max(...ys), 'Hos personer med ett barn er yngste og første barn det samme barnet.');
 
+    // vanligste fornavn
+    const firstName = p => { const g = (p.given || '').trim(); return g ? g.split(/\s+/)[0] : ''; };
+    const topNames = sx => { const m = new Map(); pool.filter(sx).forEach(p => { const n = firstName(p); if (!n) return; const k = norm(n); const e = m.get(k) || { label: n, n: 0 }; e.n++; m.set(k, e); });
+      return [...m.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label, 'nb')).slice(0, 10); };
+    const nameCol = (title, list) => h('div', { class: 'st-col' }, h('h3', { class: 'st-h3' }, title),
+      list.length ? bars(list.map(e => [e.label, e.n]), '', true) : h('p', { class: 'muted' }, 'Ingen navn ennå.'));
+    const namesCard = h('section', { class: 'card' }, h('h2', null, 'Vanligste fornavn'),
+      h('div', { class: 'st-bigs' }, nameCol('Kvinner', topNames(p => p.sex === 'f')), nameCol('Menn', topNames(p => p.sex === 'm'))),
+      h('p', { class: 'fnote' }, 'Første fornavn telles. Navn med ulik stavemåte telles hver for seg. Personer uten registrert kjønn er ikke med.'));
+
     // dødsårsaker
     const causes = new Map();
     pool.filter(isDead).forEach(p => { const c = (p.deathCause || '').trim(); if (!c) return; const k = norm(c); const e = causes.get(k) || { label: c, n: 0 }; e.n++; causes.set(k, e); });
@@ -2625,10 +2713,12 @@ const StatsView = {
         : h('p', { class: 'muted' }, 'Ingen dødsårsaker er lagt inn ennå. Du fyller dem inn på personen under «Død».'),
       h('p', { class: 'fnote' }, 'Dødsårsak er oppgitt for ' + withCause + ' av ' + plural(dead.length, 'død person', 'døde personer') + '.'));
 
+    const relMode = h('select', { class: 'inp', style: { width: 'auto', maxWidth: '100%' }, 'aria-label': 'Type slektninger', onchange: e => { this.relMode = e.target.value; this.render(); } },
+      h('option', { value: 'all', selected: this.relMode === 'all' }, 'Alle biologiske slektninger'), h('option', { value: 'line', selected: this.relMode === 'line' }, 'Bare rett linje (opp og ned)'));
     const relBox = h('div', { class: 'pf st-rel' });
     const relRef = this.rel && Store.persons.get(this.rel);
     if (relRef){
-      relBox.append(h('span', { class: 'chip' }, avatar(relRef, 26), h('span', { class: 't' }, 'Slekt av ' + fullName(relRef)), h('button', { type: 'button', 'aria-label': 'Fjern filter', onclick: () => { this.rel = null; this.render(); } }, ico('x', 14))));
+      relBox.append(h('span', { class: 'chip' }, avatar(relRef, 26), h('span', { class: 't' }, (this.relMode === 'line' ? 'Rett linje fra ' : 'Slekt av ') + fullName(relRef)), h('button', { type: 'button', 'aria-label': 'Fjern filter', onclick: () => { this.rel = null; this.render(); } }, ico('x', 14))));
     } else {
       const inp = h('input', { class: 'inp', type: 'search', placeholder: 'Bare slektninger av … (søk etter person)', autocomplete: 'off', 'aria-label': 'Bare slektninger av' });
       relBox.append(inp);
@@ -2636,9 +2726,9 @@ const StatsView = {
     }
     const perSel = h('select', { class: 'inp', style: { width: 'auto', maxWidth: '100%' }, 'aria-label': 'Fødselsperiode', onchange: e => { this.period = e.target.value; this.render(); } },
       PER.map(([v, t]) => h('option', { value: v, selected: v === this.period }, v === 'all' ? t : 'Født ' + t.replace('Født ', '').toLowerCase())));
-    root.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Statistikk'), h('p', null, plural(pool.length, 'person', 'personer') + (relSet ? ' i biologisk slekt med ' + fullName(relRef) : '') + (per[2] ? ' født i perioden' : relSet ? '' : ' i registeret') + ' · tallene bygger på det som er lagt inn'))),
-      h('div', { class: 'tools' }, perSel, relBox),
-      lifeCard, kidsCard, firstCard, lastCard, causeCard);
+    root.append(h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Statistikk'), h('p', null, plural(pool.length, 'person', 'personer') + (relSet ? (this.relMode === 'line' ? ' i rett linje opp og ned fra ' : ' i biologisk slekt med ') + fullName(relRef) : '') + (per[2] ? ' født i perioden' : relSet ? '' : ' i registeret') + ' · tallene bygger på det som er lagt inn'))),
+      h('div', { class: 'tools' }, perSel, relMode, relBox),
+      lifeCard, namesCard, kidsCard, firstCard, lastCard, causeCard);
   }
 };
 
@@ -2963,6 +3053,7 @@ async function composeBook(o, inc){
         const list = (arr, fn) => arr.map((x, i) => [i ? ', ' : '', fn(x)]);
         const rows = [];
         if (par.length) rows.push(['Foreldre', list(par, x => [nameWithRef(x), x.id === p.fatherId ? ' (far)' : x.id === p.motherId ? ' (mor)' : ' (medforelder)'])]);
+        if (p.adopted){ rows.push(['Adoptert', [p.adoptYear != null ? String(p.adoptYear) : 'ja']]); const bp = [p.bioFatherId, p.bioMotherId].map(i => i && Store.persons.get(i)).filter(Boolean); if (bp.length) rows.push(['Biologiske foreldre', list(bp, x => [nameWithRef(x), x.id === p.bioFatherId ? ' (far)' : ' (mor)'])]); }
         if (donor) rows.push(['Donor', [nameWithRef(donor)]]);
         if (prt.length) rows.push(['Partner', list(prt, x => [nameWithRef(x.p), relShort(x) ? ' (' + relShort(x) + ')' : ''])]);
         if (kids.length) rows.push(['Barn', list(kids, x => [nameWithRef(x), year(x)])]); else if (p.noKids) rows.push(['Barn', ['ingen kjente']]);
@@ -3267,6 +3358,7 @@ const App = {
   tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
+    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '25.10 07:53')); } catch (_) {}
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
