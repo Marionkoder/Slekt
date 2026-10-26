@@ -1565,6 +1565,29 @@ function lifeEvents(p, o = {}){
   return ev.map((e, i) => Object.assign(e, { i: e.k === 'a' ? -1 : i })).sort((a, b) => (a.y == null) - (b.y == null) || (a.y || 0) - (b.y || 0) || (a.md || 0) - (b.md || 0) || a.i - b.i);
 }
 
+/* Søskenbarn, tremenninger, firemenninger og femmenninger (biologisk slekt, samme generasjon) */
+const COUSIN_DEG = [[1, 'Søskenbarn'], [2, 'Tremenninger'], [3, 'Firemenninger'], [4, 'Femmenninger']];
+function cousinGroups(p){
+  const kids = new Map();
+  Store.persons.forEach(q => bioParentsOf(q).forEach(pid => { if (!kids.has(pid)) kids.set(pid, []); kids.get(pid).push(q.id); }));
+  const ancGens = id => { const g = [new Set([id])]; for (let i = 1; i <= 5; i++){ const nx = new Set(); g[i - 1].forEach(x => { const q = Store.persons.get(x); if (q) bioParentsOf(q).forEach(pp => { if (Store.persons.has(pp)) nx.add(pp); }); }); g.push(nx); } return g; };
+  const downAt = (id, d) => { let cur = new Set([id]); for (let i = 0; i < d; i++){ const nx = new Set(); cur.forEach(x => (kids.get(x) || []).forEach(k => nx.add(k))); cur = nx; } return cur; };
+  const Ap = ancGens(p.id);
+  const out = [];
+  COUSIN_DEG.forEach(([n, label]) => {
+    const found = new Map();
+    Ap[n + 1].forEach(A => downAt(A, n + 1).forEach(cid => {
+      if (cid === p.id) return;
+      const c = Store.persons.get(cid); if (!c) return;
+      const Ac = ancGens(cid);
+      for (let g = 1; g <= n; g++) for (const x of Ac[g]) if (Ap[g].has(x)) return;   // nærmere slekt (søsken eller nærmere søskenbarn)
+      const e = found.get(cid) || { p: c, via: new Set() }; e.via.add(A); found.set(cid, e);
+    }));
+    if (found.size) out.push({ label, list: [...found.values()].sort((a, b) => bcmp(a.p, b.p) || nameCmp(a.p, b.p)) });
+  });
+  return out;
+}
+
 const PersonView = {
   mount(root, id){ this.root = root; this.id = id; this.mm = null; this.render(); },
   update(){ this.render(); },
@@ -1728,11 +1751,16 @@ const PersonView = {
 
     const notesCard = p.notes && p.notes.trim() ? h('section', { class: 'card' }, h('h2', null, 'Notater'), h('p', { class: 'notes' }, p.notes)) : null;
 
+    const cg = cousinGroups(p);
+    const cousinCard = cg.length ? h('section', { class: 'card' }, h('h2', null, 'Søskenbarn og fjernere slekt'),
+      cg.map(g => h('details', { class: 'cousins' }, h('summary', null, g.label, h('span', { class: 'faint' }, ' · ' + g.list.length)),
+        h('div', { class: 'chips', style: { marginTop: '8px' } }, g.list.map(x => personChip(x.p, [x.p.birthYear != null ? 'f. ' + x.p.birthYear : '', 'via ' + [...x.via].map(i => { const a = Store.persons.get(i); return a ? (a.given || fullName(a)) : ''; }).filter(Boolean).join(' og ')].filter(Boolean).join(' · ')))))),
+      h('p', { class: 'fnote' }, 'Biologisk slekt i samme generasjon som ' + (p.given || fullName(p)) + '. Nærmere slekt er ikke gjentatt.')) : null;
     const fanCard = parentsOf(p).some(i => Store.persons.has(i)) ? h('section', { class: 'card fan-card' }, h('h2', null, 'Anetavle', h('button', { class: 'btn sm ghost', onclick: () => App.go('ancestors', p.id) }, 'Se hele anetavlen')), fanChart(p, 3)) : null;
     const ageList = AGE_SLOTS.map(([k, label]) => ({ k, label, sp: slotPortrait(p, k) })).filter(x => x.sp);
     const ageCard = ageList.length ? h('section', { class: 'card' }, h('h2', null, 'Gjennom livet'), h('div', { class: 'age-strip' }, ageList.map(x => h('button', { type: 'button', class: 'age-it', 'aria-label': x.label, onclick: () => Photos.open(x.sp.ph.id, { list: ageList.map(y => y.sp.ph.id) }) }, avatar(Object.assign({}, p, { portrait: x.sp.c }), 72), h('span', { class: 'age-t' }, x.label))))) : null;
     root.append(back, hero, h('div', { class: 'cols' },
-      h('div', { class: 'stack' }, ageCard, factsCard, vCard, fam, fanCard, notesCard),
+      h('div', { class: 'stack' }, ageCard, factsCard, vCard, fam, cousinCard, fanCard, notesCard),
       h('div', { class: 'stack' }, lifeCard, mapCard, photoCard, srcCard)));
     if (this.pendingMap){ const f = this.pendingMap; this.pendingMap = null; f(); }
   }
@@ -3944,7 +3972,7 @@ const App = {
   tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', places: 'register', place: 'register', quality: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
-    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '26.10 19:04')); } catch (_) {}
+    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '26.10 20:28')); } catch (_) {}
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
