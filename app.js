@@ -1509,6 +1509,15 @@ function lifeEvents(p){
   Idx.kidsOf(p.id).forEach(c => { if (c.birthYear != null) ev.push({ y: c.birthYear, k: 'k', t: 'Barn født: ' + fullName(c) }); });
   if (p.emigratedTo) ev.push({ y: p.emigratedYear == null ? null : p.emigratedYear, k: 'u', t: 'Utvandret til ' + pn(p.emigratedTo) });
   if (p.deathYear != null || p.deathPlace || isDead(p)) ev.push({ y: p.deathYear, k: 'd', t: (p.deathYear == null && !p.deathPlace && !(p.deathDate || '').trim() ? 'Død, tidspunkt ukjent' : 'Døde') + (pn(p.deathPlace) ? ' i ' + pn(p.deathPlace) : ''), s: p.deathDate });
+  // dødsfall i rett linje oppover og nedover i personens levetid
+  { const lo = p.birthYear != null ? p.birthYear : -Infinity, hi = p.deathYear != null ? p.deathYear : (p.birthYear != null && !isDead(p) ? Infinity : null);
+    if (hi != null && (lo !== -Infinity || hi !== Infinity)){
+      const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+      const add = (q, word) => { if (q.deathYear != null && q.deathYear >= lo && q.deathYear <= hi) ev.push({ y: q.deathYear, k: 'r', t: cap(word) + ' døde: ' + fullName(q), s: q.deathDate, pid: q.id }); };
+      const seen = new Set([p.id]);
+      (function up(id, path){ const x = Store.persons.get(id); if (!x) return; [x.fatherId, x.motherId, x.coParentId].filter(Boolean).forEach(pid => { const q = Store.persons.get(pid); if (!q || seen.has(pid)) return; seen.add(pid); const pp = [...path, pid]; add(q, kinWord(pp.length, 0, q.sex, 1, [p.id, ...pp])); up(pid, pp); }); })(p.id, []);
+      (function down(id, d){ Idx.kidsOf(id).forEach(c => { if (seen.has(c.id)) return; seen.add(c.id); add(c, kinWord(0, d + 1, c.sex, 1, [])); down(c.id, d + 1); }); })(p.id, 0);
+    } }
   return ev.map((e, i) => Object.assign(e, { i })).sort((a, b) => (a.y == null) - (b.y == null) || (a.y || 0) - (b.y || 0) || a.i - b.i);
 }
 
@@ -1630,7 +1639,7 @@ const PersonView = {
     // livsløp
     const evs = lifeEvents(p);
     const lifeCard = h('section', { class: 'card' }, h('h2', null, 'Livsløp'),
-      evs.length ? h('ul', { class: 'life-list' }, evs.map(e => h('li', null, h('div', { class: 'yr' }, e.y != null ? e.y : '–'), h('div', { class: 'dot ' + (e.k === 'k' ? 'kid' : e.k === 'm' ? 'sm' : '') }), h('div', null, h('div', null, e.t), e.s ? h('div', { class: 'k' }, e.s) : null))))
+      evs.length ? h('ul', { class: 'life-list' }, evs.map(e => h('li', null, h('div', { class: 'yr' }, e.y != null ? e.y : '–'), h('div', { class: 'dot ' + (e.k === 'k' ? 'kid' : e.k === 'm' ? 'sm' : e.k === 'r' ? 'rel' : '') }), h('div', null, h('div', null, e.t), e.s ? h('div', { class: 'k' }, e.s) : null))))
         : h('p', { class: 'muted' }, 'Legg inn fødsel, bosteder og død for å se livsløpet.'));
 
     // kart
@@ -3864,7 +3873,7 @@ const App = {
   tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', places: 'register', place: 'register', quality: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
-    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '25.10 11:56')); } catch (_) {}
+    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '26.10 08:17')); } catch (_) {}
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
