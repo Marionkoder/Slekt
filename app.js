@@ -67,7 +67,7 @@ const norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const clone = o => JSON.parse(JSON.stringify(o));
 const intOrNull = v => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
-const fullName = p => [p.given, p.patronym, p.family].filter(Boolean).join(' ') || 'Uten navn';
+const fullName = p => [p.given, p.middle, p.patronym, p.family].filter(Boolean).join(' ') || 'Uten navn';
 const initials = p => ((p.given || '?')[0] + (p.family ? p.family[0] : '')).toUpperCase();
 const nameCmp = (a, b) => (a.family || '').localeCompare(b.family || '', 'nb') || (a.given || '').localeCompare(b.given || '', 'nb');
 const isDead = p => p.deathYear != null || !!p.deceased || !!(p.deathDate && p.deathDate.trim()) || !!p.deathMonth || !!p.deathDay;
@@ -324,8 +324,9 @@ const Idx = {
   }
 };
 
+const DEFAULT_EVENTS = [{ id: 'penicillin', title: 'Penicillin blir tatt i allmenn bruk i Norge', year: 1946, month: 12, day: null, on: true }];
 const Store = {
-  persons: new Map(), photos: new Map(), db: null, assets: null, canWrite: true, mode: 'loading',
+  persons: new Map(), photos: new Map(), events: null, db: null, assets: null, canWrite: true, mode: 'loading',
   listeners: new Set(), _raf: 0,
   onChange(fn){ this.listeners.add(fn); return () => this.listeners.delete(fn); },
   emit(){
@@ -362,6 +363,10 @@ const Store = {
       snap.docChanges().forEach(ch => { if (ch.type === 'removed') this.persons.delete(ch.doc.id); else this.persons.set(ch.doc.id, Object.assign({}, ch.doc.data(), { id: ch.doc.id })); });
       this.ready = true; this.emit();
     }, fail);
+    db.collection('meta').onSnapshot(snap => {
+      snap.docChanges().forEach(ch => { if (ch.doc.id === 'events' && ch.type !== 'removed'){ const d = ch.doc.data(); if (d && Array.isArray(d.list)) this.events = d.list; } });
+      this.emit();
+    }, fail);
     db.collection('photos').onSnapshot(snap => {
       snap.docChanges().forEach(ch => { if (ch.type === 'removed') this.photos.delete(ch.doc.id); else this.photos.set(ch.doc.id, Object.assign({}, ch.doc.data(), { id: ch.doc.id })); });
       this.emit();
@@ -381,6 +386,14 @@ const Store = {
     if (LOCAL_MODE){ try { await LocalDB.del(coll, id); noteChange(); } catch (e){ console.error(e); toast('Kunne ikke slette.'); } return; }
     if (!this.db) return;
     try { await this.db.collection(coll).doc(id).delete(); } catch (e){ console.error(e); toast('Kunne ikke slette.'); }
+  },
+  /* Historiske hendelser (egen liste, vises i tidslinjen) */
+  evList(){ return this.events || DEFAULT_EVENTS; },
+  async saveEvents(list){
+    this.events = clone(list); this.emit();
+    if (LOCAL_MODE){ try { await LocalDB.put('meta', 'events', { list: this.events }); noteChange(); } catch (e){ console.error(e); toast('Kunne ikke lagre hendelsene.'); } return; }
+    if (!this.db) return;
+    try { await this.db.collection('meta').doc('events').set({ list: this.events }); } catch (e){ console.error(e); toast('Kunne ikke lagre hendelsene.'); }
   },
   async savePerson(p){ p = clone(p); this.persons.set(p.id, p); this.emit(); await this._write('persons', p); return p; },
   async savePhoto(ph){ ph = clone(ph); this.photos.set(ph.id, ph); this.emit(); await this._write('photos', ph); return ph; },
@@ -538,7 +551,7 @@ const noPlace = s => (s == null ? s : String(s).split(/(\s*[,/]\s*)/).map(t => {
 const iPaa = pl => { if (!pl) return 'i'; const t = (pl.name || '') + ' ' + (pl.farm || ''); if (/(syke|sjuke)(hus|heim|hjem)|hospital|lasarett|klinikk|fødestue|fødeavdeling|fødehjem|fødeklinikk|kirkegård|kirkegard|gravlund|gravplass|institusjon|omsorgssenter|aldershjem|barnehjem/i.test(t)) return 'på'; if (/kirke/i.test(t)) return 'i'; return pl.farm ? 'på' : 'i'; };
 
 // Fornavn med store bokstaver, resten (mellomnavn, patronym, etternavn) med vanlig skrift
-const nameFirstCaps = x => { const g = (x.given || '').trim().split(/\s+/).filter(Boolean); const first = g.shift() || ''; const rest = [g.join(' '), x.patronym, x.family].filter(Boolean).join(' '); if (!first) return fullName(x); const pat = (x.patronym && (x.birthYear == null || x.birthYear < 1900)); return h('span', null, h('b', { class: 'gn' }, first.toUpperCase()), rest ? ' ' + (pat ? rest : [g.join(' '), x.family].filter(Boolean).join(' ')) : ''); };
+const nameFirstCaps = x => { const g = (x.given || '').trim().split(/\s+/).filter(Boolean); const first = g.shift() || ''; const rest = [g.join(' '), x.middle, x.patronym, x.family].filter(Boolean).join(' '); if (!first) return fullName(x); const pat = (x.patronym && (x.birthYear == null || x.birthYear < 1900)); return h('span', null, h('b', { class: 'gn' }, first.toUpperCase()), rest ? ' ' + (pat ? rest : [g.join(' '), x.family].filter(Boolean).join(' ')) : ''); };
 
 /* ====== Datoer ======
    Fødsel/død lagres som år + (valgfritt) måned og dag: birthYear/birthMonth/birthDay, deathYear/deathMonth/deathDay.
@@ -615,7 +628,8 @@ Store.initLocal = async function(){
     upload: async blob => { const id = uid(); await LocalDB.put('blobs', id, blob); URLS.set(id, URL.createObjectURL(blob)); noteChange(); return { id, url: URLS.get(id), sizeBytes: blob.size, contentType: blob.type }; },
     delete: async id => { await LocalDB.del('blobs', id); const u = URLS.get(id); if (u) URL.revokeObjectURL(u); URLS.delete(id); }
   };
-  const [ps, phs, blobs] = await Promise.all([LocalDB.all('persons'), LocalDB.all('photos'), LocalDB.all('blobs')]);
+  const [ps, phs, blobs, evr] = await Promise.all([LocalDB.all('persons'), LocalDB.all('photos'), LocalDB.all('blobs'), LocalDB.get('meta', 'events')]);
+  if (evr && Array.isArray(evr.list)) this.events = evr.list;
   ps.forEach(([k, v]) => this.persons.set(k, Object.assign({}, v, { id: k })));
   phs.forEach(([k, v]) => this.photos.set(k, Object.assign({}, v, { id: k })));
   blobs.forEach(([k, b]) => URLS.set(k, URL.createObjectURL(b)));
@@ -723,6 +737,7 @@ async function assetBlob(id){
 }
 async function makeBackup(onProgress){
   const docs = { app: 'slektsboka', version: 1, exported: new Date().toISOString(), persons: [...Store.persons.values()], photos: [] };
+  if (Store.events) docs.events = Store.events;
   const items = [], missing = [], photos = [...Store.photos.values()];
   for (let i = 0; i < photos.length; i++){
     const ph = photos[i];
@@ -775,6 +790,11 @@ async function importBackup(file, mode, onProgress){
     await LocalDB.clear('persons'); await LocalDB.clear('photos'); await LocalDB.clear('blobs');
     URLS.forEach(u => URL.revokeObjectURL(u)); URLS.clear();
   }
+  if (Array.isArray(data.events)){
+    const cur = mode === 'replace' ? [] : Store.evList().slice();
+    data.events.forEach(e => { const i = cur.findIndex(x => x.id === e.id); if (i >= 0) cur[i] = e; else cur.push(e); });
+    Store.events = cur; await LocalDB.put('meta', 'events', { list: cur });
+  } else if (mode === 'replace'){ Store.events = null; await LocalDB.del('meta', 'events'); }
   for (const p of data.persons || []){ Store.persons.set(p.id, p); await LocalDB.put('persons', p.id, p); }
   const phs = data.photos || [];
   for (let i = 0; i < phs.length; i++){
@@ -1223,6 +1243,7 @@ function openPersonForm(opts = {}){
 
   const given = h('input', { class: 'inp', value: f.given || '', autocomplete: 'off', autofocus: true, oninput: e => f.given = e.target.value });
   const family = h('input', { class: 'inp', value: f.family || '', autocomplete: 'off', oninput: e => f.family = e.target.value });
+  const middle = h('input', { class: 'inp', value: f.middle || '', autocomplete: 'off', oninput: e => f.middle = e.target.value });
   const patInp = h('input', { class: 'inp', value: f.patronym || '', autocomplete: 'off', placeholder: 'f.eks. Olsen eller Olsdatter', oninput: e => f.patronym = e.target.value });
   const birthName = h('input', { class: 'inp', value: f.birthName || '', autocomplete: 'off', placeholder: 'Hvis annet enn etternavnet, f.eks. pikenavn', oninput: e => f.birthName = e.target.value });
   const sexBtns = {};
@@ -1295,8 +1316,8 @@ function openPersonForm(opts = {}){
     h('p', { class: 'faint full', style: { fontSize: '13px', margin: '0' } }, 'Når personen er adoptert, er Far, Mor og Medforelder over de juridiske (adoptive) foreldrene. Her kan du legge inn de biologiske foreldrene hvis de er kjent.'));
   const donorChk = h('label', { class: 'bk-chk', for: 'f-donorchild' }, h('input', { type: 'checkbox', id: 'f-donorchild', checked: !!f.donorConceived, onchange: e => { f.donorConceived = e.target.checked; donorUpd(); } }), h('span', null, 'Donorbarn', h('small', null, 'Vis feltet for donor.')));
   const adoptChk = h('label', { class: 'bk-chk', for: 'f-adopted' }, h('input', { type: 'checkbox', id: 'f-adopted', checked: !!f.adopted, onchange: e => { f.adopted = e.target.checked; donorUpd(); } }), h('span', null, 'Adoptert', h('small', null, 'Vis felt for adopsjon og biologiske foreldre.')));
-  const patWrap = fld('Patronym (valgfritt)', patInp, 'full');
-  const patUpd = () => { patWrap.style.display = ((f.birthYear != null && f.birthYear < 1900) || (f.patronym || '').trim()) ? '' : 'none'; };
+  const patWrap = fld('Patronym (valgfritt)', patInp, 'half-m');
+  const patUpd = () => {};
   const youngUpd = () => {
     if (!diedYoung(f)) return;
     const set = (id, key) => { const el = document.getElementById(id); if (el && !f[key]){ f[key] = true; el.checked = true; } };
@@ -1310,7 +1331,7 @@ function openPersonForm(opts = {}){
     if (!(f.given || '').trim() && !(f.family || '').trim()){ given.focus(); toast('Skriv inn et navn først.'); return; }
     saveBtn.disabled = true;
     const o = clone(f);
-    o.given = (o.given || '').trim(); o.family = (o.family || '').trim(); o.birthName = (o.birthName || '').trim(); o.patronym = (o.patronym || '').trim(); if (!o.patronym) delete o.patronym;
+    o.given = (o.given || '').trim(); o.family = (o.family || '').trim(); o.birthName = (o.birthName || '').trim(); o.patronym = (o.patronym || '').trim(); if (!o.patronym) delete o.patronym; o.middle = (o.middle || '').trim(); if (!o.middle) delete o.middle;
     o.birthPlace = o.birthPlace && (o.birthPlace.name || o.birthPlace.lat != null) ? o.birthPlace : null;
     o.emigratedTo = o.emigratedTo && (o.emigratedTo.name || o.emigratedTo.lat != null) ? o.emigratedTo : null; if (!o.emigratedTo) delete o.emigratedTo; if (o.emigratedYear == null || !o.emigratedTo) delete o.emigratedYear;
     o.deathPlace = o.deathPlace && (o.deathPlace.name || o.deathPlace.lat != null) ? o.deathPlace : null;
@@ -1342,7 +1363,7 @@ function openPersonForm(opts = {}){
     if (opts.onSaved) opts.onSaved(saved);
     toast(editing ? 'Endringene er lagret' : 'Personen er lagt til');
   } },
-    h('div', { class: 'fgrid' }, fld('Fornavn', given, 'half-m'), fld('Etternavn', family, 'half-m'), fld('Fødenavn', birthName, 'full'), patWrap, fld('Kjønn', sexSeg, 'full')),
+    h('div', { class: 'fgrid' }, fld('Fornavn', given, 'half-m'), fld('Mellomnavn (valgfritt)', middle, 'half-m'), patWrap, fld('Etternavn', family, 'half-m'), fld('Fødenavn', birthName, 'full'), fld('Kjønn', sexSeg, 'full')),
     h('div', { class: 'fs' }, h('h3', null, 'Født'),
       h('div', { class: 'fgrid' }, fld('År', yearInp('birthYear', 'f.eks. 1872'), 'half-m'), fld('Måned', monthSel('birthMonth'), 'half-m'), fld('Dag', dayInp('birthDay'), 'half-m'), fld('Andre detaljer (valgfritt)', textInp('birthDate', 'f.eks. «om natten», «før 1873»'), 'full'),
         fld('Fødested', placeField(f.birthPlace, pl => f.birthPlace = pl, { label: 'Fødested' }), 'full'))),
@@ -1620,6 +1641,7 @@ const PersonView = {
     const facts = h('dl', { class: 'facts' });
     const row = (k, v) => { if (v) facts.append(h('dt', null, k), h('dd', null, v)); };
     row('Født som', p.birthName || '');
+    row('Mellomnavn', p.middle || '');
     row('Patronym', p.patronym || '');
     if (p.adopted) row('Adoptert', p.adoptYear != null ? 'Ja, ' + p.adoptYear : 'Ja');
     const jn = parts => parts.filter(x => x != null && x !== '').reduce((a, x, i) => a.concat(i ? [' · ', x] : [x]), []);
@@ -2756,7 +2778,7 @@ function fanChart(p, G = 3, o = {}){
   const pt = (rad, a) => [cx + rad * Math.cos(a), cy - rad * Math.sin(a)];
   const f1 = n => n.toFixed(1);
   const trunc = (t, n) => t.length > n ? t.slice(0, Math.max(1, n - 1)) + '…' : t;
-  const parts = x => { const g = (x.given || '').trim().split(/\s+/).filter(Boolean); const first = g.shift() || ''; return { first: first.toUpperCase(), rest: [g.join(' '), x.patronym, x.family].filter(Boolean).join(' ') }; };
+  const parts = x => { const g = (x.given || '').trim().split(/\s+/).filter(Boolean); const first = g.shift() || ''; return { first: first.toUpperCase(), rest: [g.join(' '), x.middle, x.patronym, x.family].filter(Boolean).join(' ') }; };
   const svg = h('svg', { class: 'fan', viewBox: '0 0 ' + f1(W) + ' ' + f1(Ht), role: 'group', 'aria-label': 'Anetavle i vifteform for ' + fullName(p) });
   for (let i = G; i >= 1; i--){
     const n0 = Math.pow(2, i), span = SPAN / n0, ri = r[i - 1], ro = r[i], thick = ro - ri;
@@ -3047,11 +3069,22 @@ function kinWord(da, db, sexOther, count, pathMe, sexOfParentMe){
     return da === 3 ? sx('grandonkel', 'grandtante') : 'søsken til ' + (da === 4 ? 'en oldeforelder' : da === 5 ? 'en tippoldeforelder' : 'en ane i ' + (da - 1) + '. ledd');
   }
   const m = Math.min(da, db), d = Math.abs(da - db);
-  if (da === 2 && db === 2) return 'søskenbarn (' + sx('fetter', 'kusine') + ')';
-  if (da === 2 && db === 3) return 'søskenbarns barn';
-  if (da === 3 && db === 2) return 'forelders søskenbarn';
-  const base = m === 2 ? 'søskenbarn' : m === 3 ? 'tremenning' : m === 4 ? 'firemenning' : m === 5 ? 'femmenning' : m + '-menning';
-  return d === 0 ? base : base + ', ' + d + (d === 1 ? ' generasjon ' : ' generasjoner ') + (da > db ? 'eldre' : 'yngre');
+  const cname = m === 2 ? 'søskenbarn' : m === 3 ? 'tremenning' : m === 4 ? 'firemenning' : m === 5 ? 'femmenning' : m + '-menning';
+  const poss = w => /s$/.test(w) ? w : w + 's';
+  if (d === 0) return m === 2 ? 'søskenbarn (' + sx('fetter', 'kusine') + ')' : cname;
+  if (da > db){
+    // B er søskenbarn/tremenning/… av A sin forelder, besteforelder osv. (d ledd opp)
+    const anc = Store.persons.get(pathMe[d]);
+    const known = anc && (anc.sex === 'm' || anc.sex === 'f');
+    const aw = d === 1 ? (known ? (anc.sex === 'm' ? 'far' : 'mor') : 'forelder')
+      : d === 2 ? (known && parSex(pathMe[1]) !== 'u' ? kinWord(2, 0, anc.sex, 1, pathMe) : 'besteforelder')
+      : d === 3 ? (known ? kinWord(3, 0, anc.sex, 1, pathMe) : 'oldeforelder')
+      : d === 4 ? (known ? kinWord(4, 0, anc.sex, 1, pathMe) : 'tippoldeforelder') : 'ane i ' + d + '. ledd';
+    return poss(aw) + ' ' + cname;
+  }
+  // B er barn, barnebarn osv. av et søskenbarn/tremenning/… av A
+  const desc = d === 1 ? 'barn' : kinWord(0, d, 'u', 1, []);
+  return poss(cname) + ' ' + desc;
 }
 /* Finn slektskapet. Returnerer { kind, text, rev, how[] } eller null. */
 function kinship(aId, bId){
@@ -3412,7 +3445,7 @@ function runChecks(){
   const ancCache = new Map();
   const ancOf = id => { if (ancCache.has(id)) return ancCache.get(id); const set = new Set(); ancCache.set(id, set); const st = [id]; while (st.length){ const q = Store.persons.get(st.pop()); if (!q) continue; [q.fatherId, q.motherId, q.coParentId, q.donorId, q.bioFatherId, q.bioMotherId].forEach(x => { if (x && !set.has(x)){ set.add(x); st.push(x); } }); } return set; };
   const groups = new Map();
-  P.forEach(p => { const k = norm([p.given, p.patronym, p.family].filter(Boolean).join(' ')); if (!k) return; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); });
+  P.forEach(p => { const k = norm([p.given, p.middle, p.patronym, p.family].filter(Boolean).join(' ')); if (!k) return; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); });
   groups.forEach(g => { for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++){ const a = g[i], c = g[j];
     if (a.birthYear != null && c.birthYear != null && Math.abs(a.birthYear - c.birthYear) > 2) continue;
     // personer i samme linje (forfar og etterkommer) kan ikke være samme person, selv om de har samme navn
@@ -3515,10 +3548,54 @@ function residencesOf(p, sp){
   r.forEach((x, i) => { x.to = i + 1 < r.length ? r[i + 1].from : sp.d; if (x.to < x.from) x.to = x.from; });
   return r;
 }
+/* ---- Historiske hendelser ---- */
+const evT = e => e.year + (e.month ? (e.month - 1 + (e.day ? (e.day - 1) / 31 : 1)) / 12 : 0);   // tidspunktet etter hendelsen (hele måneden regnes med når dag mangler)
+const evStart = e => e.year + (e.month ? (e.month - 1 + (e.day ? (e.day - 1) / 31 : 0)) / 12 : 0);
+const evDateText = e => [e.day ? e.day + '.' : '', e.month ? MONTHS[e.month - 1] : '', e.year].filter(Boolean).join(' ');
+const ptT = (p, w) => { const x = dateOf(p, w); if (x.y == null) return null; return x.y + (x.m ? (x.m - 1 + (x.d ? (x.d - 1) / 31 : 0.5)) / 12 : 0.5); };
+function openEventManager(onDone){
+  let list = Store.evList().map(e => Object.assign({}, e)), editing = null;
+  const save = async () => { await Store.saveEvents(list); if (onDone) onDone(); };
+  const body = h('div', { class: 'modal-b' });
+  const draw = () => {
+    clear(body);
+    const f = editing || { id: '', title: '', year: '', month: null, day: null, note: '' };
+    const sorted = list.slice().sort((a, b) => evStart(a) - evStart(b));
+    body.append(h('p', { class: 'muted' }, 'Hendelser vises som loddrette streker i tidslinjen. Skru dem av og på der.'),
+      sorted.length ? h('div', { class: 'ev-list' }, sorted.map(e => h('div', { class: 'ev-row' },
+        h('label', { class: 'bk-chk' }, h('input', { type: 'checkbox', checked: e.on !== false, onchange: async ev => { e.on = ev.target.checked; await save(); } }), h('span', null, e.title, h('small', null, evDateText(e) + (e.note ? ' · ' + e.note : '')))),
+        h('div', { style: { display: 'flex', gap: '6px' } }, h('button', { class: 'btn sm', onclick: () => { editing = Object.assign({}, e); draw(); } }, 'Rediger'),
+          h('button', { class: 'btn sm ghost', 'aria-label': 'Slett ' + e.title, onclick: async () => { list = list.filter(x => x !== e); await save(); draw(); } }, ico('trash', 16)))))) : h('p', { class: 'muted' }, 'Ingen hendelser.'));
+    const t = h('input', { class: 'inp', value: f.title, placeholder: 'F.eks. Spanskesyken kommer til Norge', 'aria-label': 'Hendelse' });
+    const y = h('input', { class: 'inp', type: 'number', inputmode: 'numeric', value: f.year, placeholder: 'År', 'aria-label': 'År' });
+    const mo = h('select', { class: 'inp', 'aria-label': 'Måned' }, h('option', { value: '' }, 'Måned (valgfritt)'), ...MONTHS.map((n, i) => h('option', { value: i + 1, selected: f.month === i + 1 }, n)));
+    const d = h('input', { class: 'inp', type: 'number', inputmode: 'numeric', min: 1, max: 31, value: f.day || '', placeholder: 'Dag', 'aria-label': 'Dag' });
+    const n = h('input', { class: 'inp', value: f.note || '', placeholder: 'Merknad (valgfritt)', 'aria-label': 'Merknad' });
+    const ok = h('button', { class: 'btn primary', onclick: async () => {
+      const yr = intOrNull(y.value); if (!t.value.trim() || yr == null){ toast('Skriv hendelse og årstall.'); return; }
+      const e = { id: f.id || uid(), title: t.value.trim(), year: yr, month: mo.value ? +mo.value : null, day: mo.value && intOrNull(d.value) ? intOrNull(d.value) : null, note: n.value.trim(), on: f.id ? f.on !== false : true };
+      const i = list.findIndex(x => x.id === e.id); if (i >= 0) list[i] = e; else list.push(e);
+      editing = null; await save(); draw();
+    } }, f.id ? 'Lagre endring' : 'Legg til');
+    body.append(h('div', { class: 'fs' }, h('h3', null, f.id ? 'Rediger hendelse' : 'Ny hendelse'), t, h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.4fr) minmax(0,.8fr)', gap: '8px', marginTop: '8px' } }, y, mo, d), h('div', { style: { marginTop: '8px' } }, n),
+      h('div', { style: { marginTop: '10px', display: 'flex', gap: '8px' } }, ok, f.id ? h('button', { class: 'btn ghost', onclick: () => { editing = null; draw(); } }, 'Avbryt') : null)));
+  };
+  draw();
+  openModal('Historiske hendelser', body);
+}
+/* Av dem som døde før hendelsen, og av dem som døde etter: hvor mange døde før fylte «lim» år.
+   Bare personer med kjent fødsels- og dødsår er med. */
+function evYoung(ids, e, lim){
+  const cut = evT(e), g = { before: { n: 0, y: 0 }, after: { n: 0, y: 0 } };
+  ids.forEach(id => { const p = Store.persons.get(id); if (!p || p.birthYear == null || p.deathYear == null || p.deathYear < p.birthYear) return;
+    const dt = ptT(p, 'death'); if (dt == null) return;
+    const k = dt >= cut ? g.after : g.before; k.n++; if (p.deathYear - p.birthYear < lim) k.y++; });
+  return g;
+}
 const TL_LEVELS = [['land', 'Land'], ['fylke', 'Fylke / region'], ['kom', 'Kommune eller sted'], ['gard', 'Gård']];
 
 const TimelineView = {
-  mode: 'all', focus: null, place: '', ppy: null, sel: null, sortBy: 'birth',
+  mode: 'all', focus: null, place: '', ppy: null, sel: null, sortBy: 'birth', evSel: null, evLim: 80,
   mount(root, arg){
     this.root = root;
     if (arg && Store.persons.has(arg)){ this.focus = arg; this.sel = arg; this.mode = 'bio'; this.ppy = null; }
@@ -3538,7 +3615,26 @@ const TimelineView = {
       residencesOf(p, sp).forEach(x => { const L = placeLevels(x.place); TL_LEVELS.forEach(([k]) => { const v = L[k]; if (!v) return; const kk = k + '|' + norm(v); if (seen.has(kk)) return; seen.add(kk); const e = m[k].get(norm(v)) || { label: v, n: 0 }; e.n++; m[k].set(norm(v), e); }); }); });
     return m;
   },
+  evStatsCard(evs, ids){
+    const card = h('section', { class: 'card tl-evstat' }, h('h2', null, 'Unge dødsfall før og etter en hendelse'));
+    if (!evs.length){ card.append(h('p', { class: 'muted' }, 'Legg inn en hendelse med «Egne hendelser» for å sammenligne.')); return card; }
+    const e = evs.find(x => x.id === this.evSel) || evs.find(x => x.on !== false) || evs[0];
+    const lim = this.evLim || 80;
+    const sel = h('select', { class: 'inp', style: { width: 'auto', maxWidth: '100%' }, 'aria-label': 'Hendelse', onchange: ev => { this.evSel = ev.target.value; this.render(); } },
+      evs.map(x => h('option', { value: x.id, selected: x.id === e.id }, x.title + ' (' + evDateText(x) + ')')));
+    const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Aldersgrense' }, [[5, 'Under 5'], [15, 'Under 15'], [50, 'Under 50'], [80, 'Under 80']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(lim === k), onclick: () => { this.evLim = k; this.render(); } }, t)));
+    const G = evYoung(ids, e, lim), pc = g => g.n ? g.y / g.n : null, pct = v => v == null ? '–' : (Math.round(v * 1000) / 10).toLocaleString('nb-NO') + ' %';
+    const ph = e.month && !e.day ? MONTHS[e.month % 12] + ' ' + (e.month === 12 ? e.year + 1 : e.year) : evDateText(e);
+    const mx = Math.max(0.01, pc(G.before) || 0, pc(G.after) || 0);
+    const row = (t, g) => h('div', { class: 'st-bar' }, h('span', { class: 'l' }, t), h('span', { class: 'b' }, h('i', { style: { width: ((pc(g) || 0) / mx * 100) + '%' } })), h('span', { class: 'v' }, pct(pc(g)), h('small', null, ' ' + g.y + ' av ' + g.n)));
+    card.append(h('div', { class: 'tools' }, sel), h('div', { class: 'tools' }, seg),
+      h('p', { class: 'fnote' }, 'Andel som døde før de fylte ' + lim + ' år, blant dem som døde før ' + ph + ' og blant dem som døde fra og med ' + ph + '.'),
+      G.before.n + G.after.n ? h('div', { class: 'st-bars wide' }, row('Døde før', G.before), row('Døde etter', G.after)) : h('p', { class: 'muted' }, 'Ingen døde personer med både fødsels- og dødsår.'),
+      h('p', { class: 'fnote' }, 'Bare døde personer med både fødsels- og dødsår er med. De som lever i dag er ikke med, og det trekker andelen ned for «etter». Gjelder utvalget over (' + plural(ids.size, 'person', 'personer') + '). Små grupper gir usikre tall.'));
+    return card;
+  },
   render(){
+    const sc0 = this.wrap ? this.wrap.scrollLeft : 0;
     const root = clear(this.root);
     const back = h('button', { class: 'back', onclick: () => App.go('register') }, ico('back', 18), 'Register');
     if (!Store.persons.size){ root.append(back, h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Tidslinje'))), h('div', { class: 'empty' }, h('h2', null, 'Ingen personer ennå'), h('p', null, 'Legg inn personer med fødsels- og dødsår for å se hvem som levde samtidig.'))); return; }
@@ -3558,6 +3654,11 @@ const TimelineView = {
         ps.appendChild(h('optgroup', { label: t }, arr.map(e => h('option', { value: k + '|' + norm(e.label), selected: this.place === k + '|' + norm(e.label) }, e.label + ' (' + e.n + ')')))); });
       tools.appendChild(ps);
     }
+    const evs = Store.evList().slice().sort((a, b) => evStart(a) - evStart(b));
+    const evBar = h('div', { class: 'tl-evbar' }, h('span', { class: 'faint' }, 'Hendelser:'),
+      evs.map(e => h('button', { type: 'button', class: 'chip tl-evchip', 'aria-pressed': String(e.on !== false), title: evDateText(e), onclick: () => { Store.saveEvents(evs.map(x => x === e ? Object.assign({}, x, { on: x.on === false }) : x)); } }, e.title.length > 34 ? e.title.slice(0, 33) + '…' : e.title, ' ', h('small', null, evDateText(e)))),
+      h('button', { type: 'button', class: 'btn sm', onclick: () => openEventManager(() => this.render()) }, ico('plus', 14), 'Egne hendelser'));
+    const evOn = evs.filter(e => e.on !== false);
     // utvalg
     let ids;
     if (this.mode === 'all') ids = new Set(Store.persons.keys());
@@ -3581,7 +3682,7 @@ const TimelineView = {
     rows.sort((a, b) => a.sp.b - b.sp.b || a.sp.d - b.sp.d || nameCmp(a.p, b.p));
     const CAP = 600, total = rows.length; if (rows.length > CAP) rows = rows.slice(0, CAP);
     root.append(back, h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Tidslinje'),
-      h('p', null, this.mode === 'place' && !plKey ? 'Velg et sted for å se alle som har bodd der.' : plural(total, 'person', 'personer') + ' vises' + (noYear ? ' · ' + plural(noYear, 'person', 'personer') + ' uten årstall er ikke med' : '') + (total > CAP ? ' · bare de ' + CAP + ' første vises, snevre inn utvalget' : '') + '. Trykk på en person for å se hvem som levde samtidig.'))), tools);
+      h('p', null, this.mode === 'place' && !plKey ? 'Velg et sted for å se alle som har bodd der.' : plural(total, 'person', 'personer') + ' vises' + (noYear ? ' · ' + plural(noYear, 'person', 'personer') + ' uten årstall er ikke med' : '') + (total > CAP ? ' · bare de ' + CAP + ' første vises, snevre inn utvalget' : '') + '. Trykk på en person for å se hvem som levde samtidig.'))), tools, evBar);
     if (!rows.length){ root.append(h('div', { class: 'empty' }, h('h2', null, this.mode === 'place' ? (plKey ? 'Ingen treff' : 'Velg sted') : 'Ingen å vise'), h('p', null, this.mode === 'place' ? 'Bosteder hentes fra fødested, flyttinger og utvandring.' : 'Personene trenger fødsels- eller dødsår for å komme med.'))); return; }
     const minY = Math.floor(Math.min(...rows.map(r => r.sp.b)) / 10) * 10 - 5, maxY = Math.ceil(Math.max(...rows.map(r => r.sp.d)) / 10) * 10 + 5;
     const wrapW = Math.max(280, root.clientWidth || 360) - 8;
@@ -3591,6 +3692,9 @@ const TimelineView = {
     const first = Math.ceil(minY / step) * step;
     const axis = h('div', { class: 'tl-axis', style: { width: W + 'px' } });
     for (let y = first; y <= maxY; y += step) axis.appendChild(h('span', { style: { left: X(y) + 'px' } }, String(y)));
+    const evIn = evOn.filter(e => evStart(e) >= minY && evStart(e) <= maxY), laneEnd = [], laneOf = new Map();
+    evIn.forEach(e => { const l = X(evStart(e)), w = e.title.length * 6.4 + 14; let k = 0; while (laneEnd[k] != null && laneEnd[k] > l - 4) k++; laneEnd[k] = l + w; laneOf.set(e.id, k); });
+    if (evIn.length){ axis.style.height = (28 + laneEnd.length * 17) + 'px'; evIn.forEach(e => axis.appendChild(h('span', { class: 'tl-evl', style: { left: X(evStart(e)) + 'px', top: (26 + laneOf.get(e.id) * 17) + 'px' }, title: e.title + ' · ' + evDateText(e) + (e.note ? ' · ' + e.note : '') }, e.title))); }
     const body = h('div', { class: 'tl-rows', style: { width: W + 'px', backgroundSize: Math.round(step * ppy) + 'px 100%', backgroundPositionX: X(first) + 'px' } });
     const sel = this.sel && rows.find(r => r.p.id === this.sel);
     const overlap = (a, b) => a.b < b.d && b.b < a.d;
@@ -3611,6 +3715,7 @@ const TimelineView = {
       row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); pick(); } });
       body.appendChild(row);
     });
+    evIn.forEach(e => body.appendChild(h('div', { class: 'tl-evline', style: { left: X(evStart(e)) + 'px' }, title: e.title + ' · ' + evDateText(e) })));
     // i dag og markert levetid
     if (NOW_YEAR <= maxY) body.appendChild(h('div', { class: 'tl-now', style: { left: X(NOW_YEAR) + 'px' }, title: 'I dag' }));
     if (sel) body.appendChild(h('div', { class: 'tl-band', style: { left: X(sel.sp.b) + 'px', width: Math.max(2, X(sel.sp.d) - X(sel.sp.b)) + 'px' } }));
@@ -3626,6 +3731,8 @@ const TimelineView = {
     const info = sel ? h('div', { class: 'tl-info' }, h('div', null, h('b', null, fullName(sel.p)), ' ', h('span', { class: 'faint' }, lifeSpan(sel.p) + (sel.sp.est ? ' (anslått)' : '')), h('div', { class: 'faint' }, hits ? 'Levde samtidig med ' + plural(hits, 'annen', 'andre') + ' i utvalget.' : 'Ingen andre i utvalget levde samtidig.')),
       h('div', { style: { display: 'flex', gap: '8px' } }, h('button', { class: 'btn sm', onclick: () => App.go('person', sel.p.id) }, 'Åpne person'), h('button', { class: 'btn sm ghost', onclick: () => { this.sel = null; this.render(); } }, 'Fjern markering'))) : null;
     root.append(ctl, h('section', { class: 'card tl-card' }, wrap)); if (info) root.append(info);
+    root.append(this.evStatsCard(evs, ids));
+    wrap.scrollLeft = sc0;
     if (prev && prev.parentNode == null && this._sc != null) wrap.scrollLeft = this._sc;
   }
 };
@@ -3812,6 +3919,7 @@ async function composeBook(o, inc){
         const rows = [];
         const b = [dateFull(p, 'birth'), placeName(p.birthPlace)].filter(Boolean).join(' · ');
         const d = [dateFull(p, 'death'), placeName(p.deathPlace)].filter(Boolean).join(' · ') || (isDead(p) ? 'tidspunkt ukjent' : '');
+        if (p.middle) rows.push(['Mellomnavn', p.middle]);
         if (p.patronym) rows.push(['Patronym', p.patronym]);
         if (b) rows.push(['Født', b]);
         if (p.emigratedTo) rows.push(['Utvandret til', [p.emigratedYear != null ? String(p.emigratedYear) : null, placeName(p.emigratedTo)].filter(Boolean).join(' · ')]);
@@ -3906,7 +4014,7 @@ async function composeBook(o, inc){
     const sorted = [...persons].sort(nameCmp);
     for (let i = 0; i < sorted.length; i += 46){
       B(h('div', { class: 'bk-reg' }, sorted.slice(i, i + 46).map(p => h('div', null,
-        h('span', null, (p.family ? p.family + ', ' : '') + (p.given || ''), ' ', h('span', { class: 'p' }, lifeSpan(p))),
+        h('span', null, (p.family ? p.family + ', ' : '') + [p.given, p.middle].filter(Boolean).join(' '), ' ', h('span', { class: 'p' }, lifeSpan(p))),
         o.persons ? h('span', { class: 'p', 'data-pid': p.id }, 's. 00') : null))));
     }
   }
@@ -4148,7 +4256,7 @@ const App = {
   tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', places: 'register', place: 'register', quality: 'register', timeline: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
-    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '01.11 07:54')); } catch (_) {}
+    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '01.11 09:00')); } catch (_) {}
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
