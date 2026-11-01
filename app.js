@@ -92,6 +92,19 @@ function toast(msg){
   setTimeout(() => t.remove(), 3800);
 }
 
+/* Liste over personer bak et tall i statistikken. sections: [{ head, rows: [{ p, note }] }] */
+function showPeople(title, sections){
+  const body = h('div', { class: 'modal-b pplist' });
+  const total = sections.reduce((n, s) => n + s.rows.length, 0);
+  body.append(h('p', { class: 'muted' }, plural(total, 'person', 'personer') + '. Trykk på en person for å åpne.'));
+  sections.forEach(s => {
+    if (!s.rows.length) return;
+    body.append(h('h3', { class: 'st-h3' }, s.head + ' (' + s.rows.length + ')'),
+      h('div', { class: 'pp-rows' }, s.rows.map(r => h('button', { type: 'button', class: 'pp-row', onclick: () => { modal.close(); App.go('person', r.p.id); } },
+        h('span', { class: 'pp-n' }, fullName(r.p)), h('span', { class: 'pp-s' }, lifeSpan(r.p) + (r.note ? ' · ' + r.note : ''))))));
+  });
+  const modal = openModal(title, body);
+}
 /* ====== Modal ====== */
 const modalStack = [];
 function openModal(title, body, opts = {}){
@@ -540,6 +553,9 @@ function siblingText(p){
 
 const DEATH_CATS = ['Alderdom','Infeksjonssykdom','Hjerte- og karsykdom','Kreft','Luftveissykdom (ikke infeksiøs)','Nevrologisk sykdom og demens','Annen sykdom','Ulykke','Drukning','Barsel og fødsel','Spedbarns- og barnedød','Krig, vold og drap','Selvmord','Annet','Ukjent'];
 const deathCatOf = p => { if (p.deathCat) return p.deathCat; const t = (p.deathCause || '').trim().toLowerCase(); return DEATH_CATS.find(x => x.toLowerCase() === t) || ''; };
+/* Dødsfall som ikke sier noe om helse (til sjøs, i arbeid, krig og vold) */
+const ACCIDENT_CATS = ['Ulykke', 'Drukning', 'Krig, vold og drap'];
+const isAccident = p => ACCIDENT_CATS.includes(deathCatOf(p));
 const deathSpecOf = p => { const t = (p.deathCause || '').trim(); return t && t.toLowerCase() !== (deathCatOf(p) || '').toLowerCase() ? t : ''; };
 
 const NO_NAMES = {"Afghanistan": "Afghanistan", "Albania": "Albania", "Algeria": "Algerie", "American Samoa": "Amerikansk Samoa", "Andorra": "Andorra", "Angola": "Angola", "Anguilla": "Anguilla", "Antigua and Barbuda": "Antigua og Barbuda", "Antigua and Barb.": "Antigua og Barbuda", "Argentina": "Argentina", "Armenia": "Armenia", "Aruba": "Aruba", "Australia": "Australia", "Austria": "Østerrike", "Azerbaijan": "Aserbajdsjan", "Bahamas": "Bahamas", "The Bahamas": "Bahamas", "Bahrain": "Bahrain", "Bangladesh": "Bangladesh", "Barbados": "Barbados", "Belarus": "Hviterussland", "Belgium": "Belgia", "Belize": "Belize", "Benin": "Benin", "Bermuda": "Bermuda", "Bhutan": "Bhutan", "Bolivia": "Bolivia", "Bosnia and Herzegovina": "Bosnia-Hercegovina", "Bosnia and Herz.": "Bosnia-Hercegovina", "Botswana": "Botswana", "Brazil": "Brasil", "Brunei": "Brunei", "Bulgaria": "Bulgaria", "Burkina Faso": "Burkina Faso", "Burundi": "Burundi", "Cabo Verde": "Kapp Verde", "Cape Verde": "Kapp Verde", "Cambodia": "Kambodsja", "Cameroon": "Kamerun", "Canada": "Canada", "Cayman Islands": "Caymanøyene", "Central African Republic": "Den sentralafrikanske republikk", "Central African Rep.": "Den sentralafrikanske republikk", "Chad": "Tsjad", "Chile": "Chile", "China": "Kina", "Colombia": "Colombia", "Comoros": "Komorene", "Congo": "Kongo-Brazzaville", "Republic of the Congo": "Kongo-Brazzaville", "Democratic Republic of the Congo": "Kongo-Kinshasa", "Dem. Rep. Congo": "Kongo-Kinshasa", "Cook Islands": "Cookøyene", "Costa Rica": "Costa Rica", "Croatia": "Kroatia", "Cuba": "Cuba", "Curaçao": "Curaçao", "Cyprus": "Kypros", "Czechia": "Tsjekkia", "Czech Republic": "Tsjekkia", "Côte d'Ivoire": "Elfenbenskysten", "Ivory Coast": "Elfenbenskysten", "Denmark": "Danmark", "Djibouti": "Djibouti", "Dominica": "Dominica", "Dominican Republic": "Den dominikanske republikk", "Dominican Rep.": "Den dominikanske republikk", "Ecuador": "Ecuador", "Egypt": "Egypt", "El Salvador": "El Salvador", "Equatorial Guinea": "Ekvatorial-Guinea", "Eq. Guinea": "Ekvatorial-Guinea", "Eritrea": "Eritrea", "Estonia": "Estland", "Ethiopia": "Etiopia", "Faroe Islands": "Færøyene", "Faeroe Is.": "Færøyene", "Falkland Islands": "Falklandsøyene", "Fiji": "Fiji", "Finland": "Finland", "French Polynesia": "Fransk Polynesia", "France": "Frankrike", "Gabon": "Gabon", "Gambia": "Gambia", "The Gambia": "Gambia", "Georgia": "Georgia", "Germany": "Tyskland", "Ghana": "Ghana", "Greece": "Hellas", "Greenland": "Grønland", "Grenada": "Grenada", "Guam": "Guam", "Guatemala": "Guatemala", "Guernsey": "Guernsey", "Guinea": "Guinea", "Guinea-Bissau": "Guinea-Bissau", "Guyana": "Guyana", "Haiti": "Haiti", "Honduras": "Honduras", "Hong Kong": "Hongkong", "Hungary": "Ungarn", "Iceland": "Island", "India": "India", "Indonesia": "Indonesia", "Iran": "Iran", "Iraq": "Irak", "Ireland": "Irland", "Isle of Man": "Man", "Israel": "Israel", "Italy": "Italia", "Jamaica": "Jamaica", "Japan": "Japan", "Jersey": "Jersey", "Jordan": "Jordan", "Kazakhstan": "Kasakhstan", "Kenya": "Kenya", "Kiribati": "Kiribati", "Kosovo": "Kosovo", "Kuwait": "Kuwait", "Kyrgyzstan": "Kirgisistan", "Laos": "Laos", "Latvia": "Latvia", "Lebanon": "Libanon", "Lesotho": "Lesotho", "Liberia": "Liberia", "Libya": "Libya", "Liechtenstein": "Liechtenstein", "Lithuania": "Litauen", "Luxembourg": "Luxembourg", "Macao": "Macao", "Macau": "Macao", "North Macedonia": "Nord-Makedonia", "Macedonia": "Nord-Makedonia", "Madagascar": "Madagaskar", "Malawi": "Malawi", "Malaysia": "Malaysia", "Maldives": "Maldivene", "Mali": "Mali", "Malta": "Malta", "Marshall Islands": "Marshalløyene", "Mauritania": "Mauritania", "Mauritius": "Mauritius", "Mexico": "Mexico", "Micronesia": "Mikronesia", "Moldova": "Moldova", "Monaco": "Monaco", "Mongolia": "Mongolia", "Montenegro": "Montenegro", "Montserrat": "Montserrat", "Morocco": "Marokko", "Mozambique": "Mosambik", "Myanmar": "Myanmar", "Burma": "Myanmar", "Namibia": "Namibia", "Nauru": "Nauru", "Nepal": "Nepal", "Netherlands": "Nederland", "The Netherlands": "Nederland", "Holland": "Nederland", "New Caledonia": "Ny-Caledonia", "New Zealand": "New Zealand", "Nicaragua": "Nicaragua", "Niger": "Niger", "Nigeria": "Nigeria", "Niue": "Niue", "North Korea": "Nord-Korea", "Norway": "Norge", "Oman": "Oman", "Pakistan": "Pakistan", "Palau": "Palau", "Palestine": "Palestina", "Panama": "Panama", "Papua New Guinea": "Papua Ny-Guinea", "Paraguay": "Paraguay", "Peru": "Peru", "Philippines": "Filippinene", "Pitcairn Islands": "Pitcairnøyene", "Poland": "Polen", "Portugal": "Portugal", "Puerto Rico": "Puerto Rico", "Qatar": "Qatar", "Romania": "Romania", "Russia": "Russland", "Rwanda": "Rwanda", "Saint Helena": "St. Helena", "Saint Lucia": "St. Lucia", "Saint Kitts and Nevis": "St. Kitts og Nevis", "Saint Vincent and the Grenadines": "St. Vincent og Grenadinene", "Samoa": "Samoa", "San Marino": "San Marino", "Saudi Arabia": "Saudi-Arabia", "Senegal": "Senegal", "Serbia": "Serbia", "Seychelles": "Seychellene", "Sierra Leone": "Sierra Leone", "Singapore": "Singapore", "Sint Maarten": "Sint Maarten", "Slovakia": "Slovakia", "Slovenia": "Slovenia", "Solomon Islands": "Salomonøyene", "Somalia": "Somalia", "South Africa": "Sør-Afrika", "South Korea": "Sør-Korea", "South Sudan": "Sør-Sudan", "Spain": "Spania", "Sri Lanka": "Sri Lanka", "Sudan": "Sudan", "Suriname": "Surinam", "Sweden": "Sverige", "Switzerland": "Sveits", "Syria": "Syria", "São Tomé and Príncipe": "São Tomé og Príncipe", "Sao Tome and Principe": "São Tomé og Príncipe", "Taiwan": "Taiwan", "Tajikistan": "Tadsjikistan", "Tanzania": "Tanzania", "Thailand": "Thailand", "Timor-Leste": "Øst-Timor", "East Timor": "Øst-Timor", "Togo": "Togo", "Tonga": "Tonga", "Trinidad and Tobago": "Trinidad og Tobago", "Tunisia": "Tunisia", "Turkey": "Tyrkia", "Türkiye": "Tyrkia", "Turkmenistan": "Turkmenistan", "Tuvalu": "Tuvalu", "Uganda": "Uganda", "Ukraine": "Ukraina", "United Arab Emirates": "De forente arabiske emirater", "United Kingdom": "Storbritannia", "UK": "Storbritannia", "Great Britain": "Storbritannia", "England": "England", "Scotland": "Skottland", "Wales": "Wales", "Northern Ireland": "Nord-Irland", "United States": "USA", "United States of America": "USA", "Uruguay": "Uruguay", "Uzbekistan": "Usbekistan", "Vanuatu": "Vanuatu", "Vatican": "Vatikanstaten", "Vatican City": "Vatikanstaten", "Venezuela": "Venezuela", "Vietnam": "Vietnam", "Western Sahara": "Vest-Sahara", "Yemen": "Jemen", "Zambia": "Zambia", "Zimbabwe": "Zimbabwe", "Eswatini": "Eswatini", "Swaziland": "Eswatini", "Åland": "Åland", "Åland Islands": "Åland", "Gibraltar": "Gibraltar", "Svalbard": "Svalbard", "Yugoslavia": "Jugoslavia", "Soviet Union": "Sovjetunionen", "USSR": "Sovjetunionen", "Prussia": "Preussen", "Copenhagen": "København", "Gothenburg": "Göteborg", "Rome": "Roma", "Venice": "Venezia", "Florence": "Firenze", "Naples": "Napoli", "Milan": "Milano", "Athens": "Aten", "Moscow": "Moskva", "Warsaw": "Warszawa", "Prague": "Praha", "Vienna": "Wien", "Lisbon": "Lisboa", "Brussels": "Brussel", "Cologne": "Köln", "Munich": "München", "Geneva": "Genève", "Helsinki": "Helsingfors", "Saint Petersburg": "St. Petersburg", "Edinburgh": "Edinburgh", "New York City": "New York", "Turin": "Torino", "Seville": "Sevilla", "Antwerp": "Antwerpen", "The Hague": "Haag", "Zurich": "Zürich", "Belgrade": "Beograd", "Bucharest": "București", "Kyiv": "Kyiv", "Kiev": "Kyiv", "Peking": "Beijing", "Cairo": "Kairo", "Jerusalem": "Jerusalem", "Constantinople": "Konstantinopel", "Istanbul": "Istanbul", "Danzig": "Danzig"};
@@ -1635,6 +1651,7 @@ const PersonView = {
           h('button', { class: 'btn', onclick: () => App.go('kinship', p.id) }, ico('users', 16), 'Slektskap'),
           h('button', { class: 'btn', onclick: () => App.go('tree', p.id) }, ico('tree', 16), 'Vis i slektstreet'),
           h('button', { class: 'btn', onclick: () => App.go('timeline', p.id) }, ico('fit', 16), 'Tidslinje'),
+          h('button', { class: 'btn', onclick: () => App.go('compare', p.id) }, ico('users', 16), 'Sammenlign'),
           h('button', { class: 'btn', onclick: () => App.go('map', p.id) }, ico('pin', 16), 'Vis på kartet'))));
 
     // fakta
@@ -2935,7 +2952,7 @@ const DescendantsView = {
 
 /* ====== Statistikk ====== */
 const StatsView = {
-  period: 'all', complete: true, rel: null, relMode: 'all',
+  period: 'all', noAcc: false, complete: true, rel: null, relMode: 'all',
   mount(root){ this.root = root; this.render(); },
   update(){ this.render(); },
   render(){
@@ -2954,20 +2971,27 @@ const StatsView = {
     const sum = (label, a, unit) => ({ label, n: a.length, avg: avg(a), med: med(a), min: a.length ? Math.min(...a) : null, max: a.length ? Math.max(...a) : null, unit });
     const table = (rows, cols) => h('div', { class: 'st-tbl-wrap' }, h('table', { class: 'st-tbl' }, h('thead', null, h('tr', null, cols.map(c => h('th', null, c)))),
       h('tbody', null, rows.map(r => h('tr', null, r.map((c, i) => h(i ? 'td' : 'th', { scope: i ? null : 'row' }, c)))))));
-    const bars = (items, unit, wide) => { const mx = Math.max(1, ...items.map(i => i[1])); return h('div', { class: 'st-bars' + (wide ? ' wide' : '') }, items.map(([l, v]) => h('div', { class: 'st-bar' }, h('span', { class: 'l' }, l), h('span', { class: 'b' }, h('i', { style: { width: (v / mx * 100) + '%' } })), h('span', { class: 'v' }, v + (unit || ''))))); };
+    const bars = (items, unit, wide, ttl) => { const mx = Math.max(1, ...items.map(i => i[1])); return h('div', { class: 'st-bars' + (wide ? ' wide' : '') }, items.map(([l, v, who, note]) => { const ck = !!(who && v && who.length);
+      const open = () => showPeople((ttl ? ttl + ': ' : '') + l, [{ head: 'Personer', rows: who.slice().sort(nameCmp).map(p => ({ p, note: note ? note(p) : '' })) }]);
+      return h('div', { class: 'st-bar' + (ck ? ' click' : ''), role: ck ? 'button' : null, tabindex: ck ? 0 : null, title: ck ? 'Vis hvem det gjelder' : null, onclick: ck ? open : null, onkeydown: ck ? e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); open(); } } : null },
+        h('span', { class: 'l' }, l), h('span', { class: 'b' }, h('i', { style: { width: (v / mx * 100) + '%' } })), h('span', { class: 'v' }, v + (unit || ''))); })); };
     const big = (n, label, sub) => h('div', { class: 'st-big' }, h('b', null, n), h('span', null, label), sub ? h('small', null, sub) : null);
 
     // levealder
-    const ages = sx => pool.filter(sx).filter(p => p.birthYear != null && p.deathYear != null && p.deathYear >= p.birthYear).map(p => p.deathYear - p.birthYear);
+    const noAcc = this.noAcc;
+    const ages = sx => pool.filter(sx).filter(p => !(noAcc && isAccident(p))).filter(p => p.birthYear != null && p.deathYear != null && p.deathYear >= p.birthYear).map(p => p.deathYear - p.birthYear);
     const lifeRows = sexes.map(([l, f]) => { const a = ages(f), ad = a.filter(x => x >= 15), a50 = a.filter(x => x >= 50); return [l, a.length, fmt(avg(a)), fmt(med(a)), fmt(avg(ad)), fmt(avg(a50)) + (a50.length ? ' (' + a50.length + ')' : ''), a.length ? Math.min(...a) + ' – ' + Math.max(...a) : '–']; });
     const allAges = ages(() => true);
-    const bins = []; for (let b = 0; b < 100; b += 10) bins.push([b + '–' + (b + 9), allAges.filter(x => x >= b && x < b + 10).length]);
-    bins.push(['100+', allAges.filter(x => x >= 100).length]);
+    const agedP = pool.filter(p => !(noAcc && isAccident(p)) && p.birthYear != null && p.deathYear != null && p.deathYear >= p.birthYear), ageOf = p => p.deathYear - p.birthYear;
+    const bins = []; for (let b = 0; b < 100; b += 10) bins.push([b + '–' + (b + 9), allAges.filter(x => x >= b && x < b + 10).length, agedP.filter(p => ageOf(p) >= b && ageOf(p) < b + 10), p => ageOf(p) + ' år']);
+    bins.push(['100+', allAges.filter(x => x >= 100).length, agedP.filter(p => ageOf(p) >= 100), p => ageOf(p) + ' år']);
+    const accN = pool.filter(p => isAccident(p) && p.birthYear != null && p.deathYear != null).length;
     const lifeCard = h('section', { class: 'card' }, h('h2', null, 'Levealder'),
+      h('label', { class: 'bk-chk', for: 'st-noacc' }, h('input', { type: 'checkbox', id: 'st-noacc', checked: !!noAcc, onchange: e => { this.noAcc = e.target.checked; this.render(); } }), h('span', null, 'Utelat ulykker, drukning og vold', h('small', null, 'Dødsfall til sjøs, i arbeid, i krig eller ved vold sier lite om helse. Gjelder bare personer med dødsårsak registrert (' + plural(accN, 'person', 'personer') + ' har det her).'))),
       allAges.length ? [h('div', { class: 'st-bigs' }, big(fmt(avg(allAges)) + ' år', 'gjennomsnitt', 'median ' + fmt(med(allAges)) + ' år'), big(fmt(avg(allAges.filter(x => x >= 15))) + ' år', 'for dem som ble 15 år eller eldre', plural(allAges.filter(x => x < 15).length, 'barnedødsfall', 'barnedødsfall') + ' utelatt'),
           big(fmt(avg(allAges.filter(x => x >= 50))) + ' år', 'for dem som ble 50 år eller eldre', plural(allAges.filter(x => x >= 50).length, 'person', 'personer'))),
         table(lifeRows, ['', 'Antall', 'Snitt', 'Median', 'Snitt (15+)', 'Snitt (50+)', 'Yngste – eldste']),
-        h('h3', { class: 'st-h3' }, 'Alder ved dødsfall'), bars(bins)]
+        h('h3', { class: 'st-h3' }, 'Alder ved dødsfall'), bars(bins, '', false, 'Alder ved dødsfall')]
         : h('p', { class: 'muted' }, 'Ingen personer har både fødselsår og dødsår ennå.'),
       h('p', { class: 'fnote' }, 'Bare personer med både fødselsår og dødsår er med.'));
 
@@ -2981,7 +3005,7 @@ const StatsView = {
         return h('div', { class: 'st-col' }, h('h3', { class: 'st-h3' }, l),
           r.length ? [big(fmt(avg(a)), 'barn per ' + (l === 'Kvinner' ? 'kvinne' : 'mann'), 'blant ' + plural(r.length, 'person', 'personer') + ' med kjent barnestatus'),
             big(fmt(avg(par)), 'barn per ' + (l === 'Kvinner' ? 'mor' : 'far'), plural(par.length, (l === 'Kvinner' ? 'mor' : 'far'), (l === 'Kvinner' ? 'mødre' : 'fedre')) + ' · flest ' + (par.length ? Math.max(...par) : '–')),
-            bars([0, 1, 2, 3, 4, 5, 6, 7].map(k => [k === 7 ? '7+' : String(k), a.filter(x => k === 7 ? x >= 7 : x === k).length]))]
+            bars([0, 1, 2, 3, 4, 5, 6, 7].map(k => { const w = r.filter(x => k === 7 ? x.n >= 7 : x.n === k).map(x => x.p); return [k === 7 ? '7+' : String(k), w.length, w, p => plural(Idx.kidsOf(p.id).length, 'barn', 'barn')]; }), '', false, 'Barn per ' + (l === 'Kvinner' ? 'kvinne' : 'mann'))]
             : h('p', { class: 'muted' }, 'Ingen med kjent barnestatus.'));
       })),
       h('p', { class: 'fnote' }, 'Personer uten registrerte barn telles bare med hvis du har krysset av for «Ingen kjente barn». Ellers vet ikke appen om de ikke fikk barn eller om barna bare ikke er lagt inn. Barn regnes under begge juridiske foreldre. Donor telles ikke.'));
@@ -3001,10 +3025,10 @@ const StatsView = {
 
     // vanligste fornavn
     const firstName = p => { const g = (p.given || '').trim(); return g ? g.split(/\s+/)[0] : ''; };
-    const topNames = sx => { const m = new Map(); pool.filter(sx).forEach(p => { const n = firstName(p); if (!n) return; const k = norm(n); const e = m.get(k) || { label: n, n: 0 }; e.n++; m.set(k, e); });
+    const topNames = sx => { const m = new Map(); pool.filter(sx).forEach(p => { const n = firstName(p); if (!n) return; const k = norm(n); const e = m.get(k) || { label: n, n: 0, who: [] }; e.n++; e.who.push(p); m.set(k, e); });
       return [...m.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label, 'nb')).slice(0, 10); };
     const nameCol = (title, list) => h('div', { class: 'st-col' }, h('h3', { class: 'st-h3' }, title),
-      list.length ? bars(list.map(e => [e.label, e.n]), '', true) : h('p', { class: 'muted' }, 'Ingen navn ennå.'));
+      list.length ? bars(list.map(e => [e.label, e.n, e.who]), '', true, 'Fornavn') : h('p', { class: 'muted' }, 'Ingen navn ennå.'));
     const namesCard = h('section', { class: 'card' }, h('h2', null, 'Vanligste fornavn'),
       h('div', { class: 'st-bigs' }, nameCol('Kvinner', topNames(p => p.sex === 'f')), nameCol('Menn', topNames(p => p.sex === 'm'))),
       h('p', { class: 'fnote' }, 'Første fornavn telles. Navn med ulik stavemåte telles hver for seg. Personer uten registrert kjønn er ikke med.'));
@@ -3012,10 +3036,10 @@ const StatsView = {
     // dødsårsaker
     const causes = new Map();
     const dead = pool.filter(isDead);
-    dead.forEach(p => { const c = deathCatOf(p); if (!c) return; causes.set(c, (causes.get(c) || 0) + 1); });
+    dead.forEach(p => { const c = deathCatOf(p); if (!c) return; if (!causes.has(c)) causes.set(c, []); causes.get(c).push(p); });
     const withCause = dead.filter(p => deathCatOf(p)).length;
     const causeCard = h('section', { class: 'card' }, h('h2', null, 'Dødsårsaker'),
-      causes.size ? bars([...causes.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'nb')), '', true)
+      causes.size ? bars([...causes.entries()].map(([c, w]) => [c, w.length, w]).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'nb')), '', true, 'Dødsårsak')
         : h('p', { class: 'muted' }, 'Ingen dødsårsaker er lagt inn ennå. Du velger gruppe på personen under «Død».'),
       h('p', { class: 'fnote' }, 'Dødsårsak er oppgitt for ' + withCause + ' av ' + plural(dead.length, 'død person', 'døde personer') + '.'));
 
@@ -3585,17 +3609,22 @@ function openEventManager(onDone){
 }
 /* Av dem som døde før hendelsen, og av dem som døde etter: hvor mange døde før fylte «lim» år.
    Bare personer med kjent fødsels- og dødsår er med. */
-function evYoung(ids, e, lim){
-  const cut = evT(e), g = { before: { n: 0, y: 0 }, after: { n: 0, y: 0 } };
-  ids.forEach(id => { const p = Store.persons.get(id); if (!p || p.birthYear == null || p.deathYear == null || p.deathYear < p.birthYear) return;
+function evYoung(ids, e, lim, noAcc){
+  const cut = evT(e), now = NOW_YEAR + 0.83, g = { before: { n: 0, y: 0, list: [] }, after: { n: 0, y: 0, list: [] }, alive: 0, pending: 0, skipped: 0 };
+  ids.forEach(id => { const p = Store.persons.get(id); if (!p || p.birthYear == null) return;
+    if (!isDead(p)){   // nålevende dør uansett etter hendelsen; de er med når de allerede har nådd aldersgrensen
+      if (now - ptT(p, 'birth') >= lim){ g.after.n++; g.alive++; g.after.list.push({ p, age: Math.floor(now - ptT(p, 'birth')), y: false, live: true }); } else g.pending++;
+      return; }
+    if (p.deathYear == null || p.deathYear < p.birthYear) return;
     const dt = ptT(p, 'death'); if (dt == null) return;
-    const k = dt >= cut ? g.after : g.before; k.n++; if (p.deathYear - p.birthYear < lim) k.y++; });
+    if (noAcc && isAccident(p)){ g.skipped++; return; }
+    const k = dt >= cut ? g.after : g.before; k.n++; const yg = p.deathYear - p.birthYear < lim; if (yg) k.y++; k.list.push({ p, age: p.deathYear - p.birthYear, y: yg }); });
   return g;
 }
 const TL_LEVELS = [['land', 'Land'], ['fylke', 'Fylke / region'], ['kom', 'Kommune eller sted'], ['gard', 'Gård']];
 
 const TimelineView = {
-  mode: 'all', focus: null, place: '', ppy: null, sel: null, sortBy: 'birth', evSel: null, evLim: 80,
+  mode: 'all', focus: null, place: '', ppy: null, sel: null, sortBy: 'birth', evSel: null, evLim: 80, evNoAcc: false,
   mount(root, arg){
     this.root = root;
     if (arg && Store.persons.has(arg)){ this.focus = arg; this.sel = arg; this.mode = 'bio'; this.ppy = null; }
@@ -3622,15 +3651,18 @@ const TimelineView = {
     const lim = this.evLim || 80;
     const sel = h('select', { class: 'inp', style: { width: 'auto', maxWidth: '100%' }, 'aria-label': 'Hendelse', onchange: ev => { this.evSel = ev.target.value; this.render(); } },
       evs.map(x => h('option', { value: x.id, selected: x.id === e.id }, x.title + ' (' + evDateText(x) + ')')));
-    const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Aldersgrense' }, [[5, 'Under 5'], [15, 'Under 15'], [50, 'Under 50'], [80, 'Under 80']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(lim === k), onclick: () => { this.evLim = k; this.render(); } }, t)));
-    const G = evYoung(ids, e, lim), pc = g => g.n ? g.y / g.n : null, pct = v => v == null ? '–' : (Math.round(v * 1000) / 10).toLocaleString('nb-NO') + ' %';
+    const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Aldersgrense' }, [[5, 'Under 5'], [15, 'Under 15'], [50, 'Under 50'], [80, 'Under 80'], [90, 'Under 90']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(lim === k), onclick: () => { this.evLim = k; this.render(); } }, t)));
+    const G = evYoung(ids, e, lim, this.evNoAcc), pc = g => g.n ? g.y / g.n : null, pct = v => v == null ? '–' : (Math.round(v * 1000) / 10).toLocaleString('nb-NO') + ' %';
     const ph = e.month && !e.day ? MONTHS[e.month % 12] + ' ' + (e.month === 12 ? e.year + 1 : e.year) : evDateText(e);
     const mx = Math.max(0.01, pc(G.before) || 0, pc(G.after) || 0);
-    const row = (t, g) => h('div', { class: 'st-bar' }, h('span', { class: 'l' }, t), h('span', { class: 'b' }, h('i', { style: { width: ((pc(g) || 0) / mx * 100) + '%' } })), h('span', { class: 'v' }, pct(pc(g)), h('small', null, ' ' + g.y + ' av ' + g.n)));
+    const open = (t, g) => { const mk = r => ({ p: r.p, note: r.age + ' år' + (r.live ? ', lever' : '') }), srt = (a, b) => b.age - a.age;
+      showPeople(t, [{ head: 'Døde før fylte ' + lim + ' år', rows: g.list.filter(r => r.y).sort(srt).map(mk) }, { head: 'Fylte ' + lim + ' år eller mer', rows: g.list.filter(r => !r.y).sort(srt).map(mk) }]); };
+    const row = (t, g) => h('div', { class: 'st-bar2 click', role: 'button', tabindex: 0, title: 'Vis hvem det gjelder', onclick: () => open(t, g), onkeydown: ev => { if (ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); open(t, g); } } }, h('div', { class: 'l2' }, t), h('div', { class: 'st-bar' }, h('span', { class: 'b' }, h('i', { style: { width: ((pc(g) || 0) / mx * 100) + '%' } })), h('span', { class: 'v' }, pct(pc(g)), h('small', null, g.y + ' av ' + g.n))));
     card.append(h('div', { class: 'tools' }, sel), h('div', { class: 'tools' }, seg),
+      h('label', { class: 'bk-chk', for: 'ev-noacc' }, h('input', { type: 'checkbox', id: 'ev-noacc', checked: !!this.evNoAcc, onchange: ev => { this.evNoAcc = ev.target.checked; this.render(); } }), h('span', null, 'Utelat ulykker, drukning og vold', h('small', null, 'Dødsfall som ikke sier noe om helse. Gjelder dem som har dødsårsak registrert.' + (this.evNoAcc ? ' ' + plural(G.skipped, 'person', 'personer') + ' er utelatt.' : '')))),
       h('p', { class: 'fnote' }, 'Andel som døde før de fylte ' + lim + ' år, blant dem som døde før ' + ph + ' og blant dem som døde fra og med ' + ph + '.'),
-      G.before.n + G.after.n ? h('div', { class: 'st-bars wide' }, row('Døde før', G.before), row('Døde etter', G.after)) : h('p', { class: 'muted' }, 'Ingen døde personer med både fødsels- og dødsår.'),
-      h('p', { class: 'fnote' }, 'Bare døde personer med både fødsels- og dødsår er med. De som lever i dag er ikke med, og det trekker andelen ned for «etter». Gjelder utvalget over (' + plural(ids.size, 'person', 'personer') + '). Små grupper gir usikre tall.'));
+      G.before.n + G.after.n ? h('div', { class: 'st-bars wide' }, row('Døde før «' + e.title + '»', G.before), row('Døde etter «' + e.title + '», og nålevende som har fylt ' + lim + ' år', G.after)) : h('p', { class: 'muted' }, 'Ingen døde personer med både fødsels- og dødsår.'),
+      h('p', { class: 'fnote' }, '«Etter» omfatter også ' + plural(G.alive, 'nålevende', 'nålevende') + ' som allerede har fylt ' + lim + ' år (de døde ikke unge). ' + (G.pending ? plural(G.pending, 'nålevende', 'nålevende') + ' under ' + lim + ' år er ikke med, siden det ikke er avgjort om de dør unge. Det trekker andelen for «etter» noe opp. ' : '') + 'Døde personer må ha både fødsels- og dødsår. Trykk på en søyle for å se hvem det gjelder. Gjelder utvalget over (' + plural(ids.size, 'person', 'personer') + '). Små grupper gir usikre tall.'));
     return card;
   },
   render(){
@@ -3734,6 +3766,102 @@ const TimelineView = {
     root.append(this.evStatsCard(evs, ids));
     wrap.scrollLeft = sc0;
     if (prev && prev.parentNode == null && this._sc != null) wrap.scrollLeft = this._sc;
+  }
+};
+
+/* ====== Sammenlign med formødre / formenn og deres etterkommere ====== */
+const CMP_METRICS = [
+  { k: 'child', t: 'Alder ved første barn', ok: v => v >= 12 && v <= 70 },
+  { k: 'gift', t: 'Alder ved første ekteskap', ok: v => v >= 12 && v <= 85 },
+  { k: 'samb', t: 'Alder ved første samboerskap', ok: v => v >= 12 && v <= 85 },
+  { k: 'life', t: 'Levealder', ok: v => v >= 0 && v <= 115 }
+];
+const CompareView = {
+  focus: null, sex: null, line: 'all', before: false, noAcc: false,
+  mount(root, arg){
+    this.root = root;
+    if (arg && Store.persons.has(arg)){ this.focus = arg; const s = Store.persons.get(arg).sex; this.sex = s === 'm' ? 'm' : 'f'; }
+    this.render();
+  },
+  update(){ this.render(); },
+  unmount(){},
+  group(ref){
+    const sex = this.sex, kidsOf = new Map();
+    Store.persons.forEach(p => bioParentsOf(p).forEach(pid => { if (!kidsOf.has(pid)) kidsOf.set(pid, []); kidsOf.get(pid).push(p.id); }));
+    const anc = new Set();
+    if (this.line === 'strict'){ let cur = ref, guard = 0; while (cur && guard++ < 40){ const nid = sex === 'f' ? cur.motherId : cur.fatherId; if (!nid || anc.has(nid)) break; anc.add(nid); cur = Store.persons.get(nid); } }
+    else (function up(i){ const p = Store.persons.get(i); if (!p) return; bioParentsOf(p).forEach(x => { if (!anc.has(x)){ anc.add(x); up(x); } }); })(ref.id);
+    const ancSex = [...anc].filter(i => { const p = Store.persons.get(i); return p && p.sex === sex; });
+    const out = new Set(), seen = new Set();
+    const down = i => { if (seen.has(i)) return; seen.add(i); const p = Store.persons.get(i); if (p && p.sex === sex) out.add(i); (kidsOf.get(i) || []).forEach(down); };
+    ancSex.forEach(down);
+    out.delete(ref.id);
+    return { ids: [...out].map(i => Store.persons.get(i)).filter(p => p && (!this.before || (p.birthYear != null && ref.birthYear != null && p.birthYear < ref.birthYear))), anc: ancSex.length };
+  },
+  values(){
+    const inc = new Map();
+    Store.persons.forEach(o => (o.partners || []).forEach(pt => { if (pt.id){ if (!inc.has(pt.id)) inc.set(pt.id, []); inc.get(pt.id).push({ oid: o.id, pt }); } }));
+    return p => {
+      const out = {}, b = p.birthYear; if (b == null) return out;
+      const ys = Idx.kidsOf(p.id).map(c => c.birthYear).filter(y => y != null); if (ys.length) out.child = Math.min(...ys) - b;
+      const rel = new Map();
+      const add = (oid, pt) => { const k = pt.kind || (pt.year != null ? 'gift' : 'partner'), cur = rel.get(oid); if (!cur || (cur.year == null && pt.year != null)) rel.set(oid, { kind: k, year: pt.year }); };
+      (p.partners || []).forEach(pt => pt.id && add(pt.id, pt)); (inc.get(p.id) || []).forEach(x => add(x.oid, x.pt));
+      const yr = kind => { const a = [...rel.values()].filter(r => r.kind === kind && r.year != null).map(r => r.year); return a.length ? Math.min(...a) - b : null; };
+      const g = yr('gift'), s = yr('samboer'); if (g != null) out.gift = g; if (s != null) out.samb = s;
+      if (p.deathYear != null && p.deathYear >= b && !(this.noAcc && isAccident(p))) out.life = p.deathYear - b;
+      return out;
+    };
+  },
+  render(){
+    const root = clear(this.root);
+    const back = h('button', { class: 'back', onclick: () => App.go('register') }, ico('back', 18), 'Register');
+    if (!Store.persons.size){ root.append(back, h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Sammenlign'))), h('div', { class: 'empty' }, h('h2', null, 'Ingen personer ennå'))); return; }
+    if (!this.focus || !Store.persons.has(this.focus)){ const ps = [...Store.persons.values()].sort((a, b) => (a.birthYear == null) - (b.birthYear == null) || b.birthYear - a.birthYear); this.focus = ps[0].id; this.sex = ps[0].sex === 'm' ? 'm' : 'f'; }
+    const ref = Store.persons.get(this.focus), F = this.sex === 'f';
+    const sel = h('select', { class: 'inp', style: { width: 'auto', maxWidth: '100%' }, 'aria-label': 'Hovedperson', onchange: e => { this.focus = e.target.value; const s = Store.persons.get(this.focus).sex; if (s === 'm' || s === 'f') this.sex = s; this.render(); } });
+    [...Store.persons.values()].sort(nameCmp).forEach(p => sel.appendChild(h('option', { value: p.id, selected: p.id === this.focus }, fullName(p) + (p.birthYear != null ? ' (f. ' + p.birthYear + ')' : ''))));
+    const seg = (items, cur, set, label) => h('div', { class: 'seg', role: 'group', 'aria-label': label }, items.map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(cur === k), onclick: () => { set(k); this.render(); } }, t)));
+    const chk = (id, label, sub, val, set) => h('label', { class: 'bk-chk', for: id }, h('input', { type: 'checkbox', id, checked: val, onchange: e => { set(e.target.checked); this.render(); } }), h('span', null, label, sub ? h('small', null, sub) : null));
+    const G = this.group(ref), val = this.values(), mine = val(ref);
+    const word = F ? ['formødre', 'kvinnelige etterkommere', 'morslinja'] : ['formenn', 'mannlige etterkommere', 'farslinja'];
+    root.append(back, h('div', { class: 'page-h' }, h('div', null, h('h1', null, 'Sammenlign'),
+      h('p', null, fullName(ref) + ' sammenlignet med ' + (F ? 'formødre og deres kvinnelige etterkommere' : 'formenn og deres mannlige etterkommere') + ' · ' + plural(G.ids.length, 'person', 'personer') + (G.anc ? ' fra ' + plural(G.anc, F ? 'formor' : 'formann', F ? 'formødre' : 'formenn') : '')))),
+      h('div', { class: 'tools' }, sel), h('div', { class: 'tools' }, seg([['f', 'Kvinner'], ['m', 'Menn']], this.sex, k => this.sex = k, 'Kjønn'), seg([['all', 'Alle ' + word[0]], ['strict', 'Bare ' + word[2]]], this.line, k => this.line = k, 'Utvalg')),
+      chk('cmp-before', 'Bare de som er født før ' + (ref.given || 'hovedpersonen'), 'Sammenlign med tidligere generasjoner og jevnaldrende eldre.', this.before, v => this.before = v),
+      chk('cmp-noacc', 'Utelat ulykker, drukning og vold fra levealder', 'Gjelder dem som har dødsårsak registrert.', this.noAcc, v => this.noAcc = v));
+    if (!G.ids.length){ root.append(h('div', { class: 'empty' }, h('h2', null, 'Ingen å sammenligne med'), h('p', null, 'Legg inn foreldre og besteforeldre av samme kjønn, og kjønn på personene i slekten.'))); return; }
+    const rows = G.ids.map(p => ({ p, v: val(p) }));
+    const fmt = v => v == null ? '–' : (Math.round(v * 10) / 10).toLocaleString('nb-NO');
+    CMP_METRICS.forEach(M => {
+      const list = rows.filter(r => r.v[M.k] != null && M.ok(r.v[M.k])).map(r => ({ p: r.p, v: r.v[M.k] })), my = mine[M.k] != null && M.ok(mine[M.k]) ? mine[M.k] : null;
+      const card = h('section', { class: 'card cmp-card' }, h('h2', null, M.t));
+      const nowAge = M.k === 'life' && my == null && !isDead(ref) && ref.birthYear != null ? NOW_YEAR - ref.birthYear : null;
+      if (!list.length){ card.append(h('p', { class: 'muted' }, 'Ingen i utvalget har dette registrert ennå.')); root.append(card); return; }
+      const vs = list.map(x => x.v).sort((a, b) => a - b), n = vs.length, avg = vs.reduce((a, b) => a + b, 0) / n, med = n % 2 ? vs[n >> 1] : (vs[n / 2 - 1] + vs[n / 2]) / 2;
+      const lo = Math.min(...vs, my == null ? 1e9 : my), hi = Math.max(...vs, my == null ? -1e9 : my);
+      const cnt = new Map(); list.forEach(x => { if (!cnt.has(x.v)) cnt.set(x.v, []); cnt.get(x.v).push(x); });
+      const mx = Math.max(...[...cnt.values()].map(a => a.length));
+      const hist = h('div', { class: 'cmp-hist', role: 'group', 'aria-label': 'Fordeling' });
+      for (let v = lo; v <= hi; v++){
+        const a = cnt.get(v) || [];
+        const bin = h('div', { class: 'cmp-bin' + (v === my ? ' me' : '') + (a.length ? ' has' : ''), title: v + ' år' + (a.length ? ': ' + plural(a.length, 'person', 'personer') : '') + (v === my ? ' · ' + (ref.given || 'deg') : ''),
+          role: a.length ? 'button' : null, tabindex: a.length ? 0 : null }, h('i', { style: { height: (a.length ? Math.max(8, a.length / mx * 100) : 0) + '%' } }));
+        if (a.length){ const open = () => showPeople(M.t + ': ' + v + ' år', [{ head: 'Personer', rows: a.map(x => ({ p: x.p, note: v + ' år' })).sort((x, y) => nameCmp(x.p, y.p)) }]); bin.addEventListener('click', open); bin.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); open(); } }); }
+        hist.appendChild(bin);
+      }
+      const below = my == null ? 0 : vs.filter(x => x < my).length, same = my == null ? 0 : vs.filter(x => x === my).length, life = M.k === 'life';
+      const cmpWord = my == null ? '' : my > med ? (life ? 'Levde lenger enn' : 'Eldre enn') : my < med ? (life ? 'Levde kortere enn' : 'Yngre enn') : 'Lik';
+      const note = my == null ? (nowAge != null ? fullName(ref) + ' lever ennå (' + nowAge + ' år).' : 'Ikke registrert for ' + (ref.given || 'hovedpersonen') + '.')
+        : cmpWord + (my === med ? ' medianen' : ' medianen') + '. ' + below + ' av ' + n + ' har lavere tall' + (same ? ', ' + same + ' har samme' : '') + '.';
+      card.append(h('div', { class: 'st-bigs' },
+        h('div', { class: 'st-big' }, h('b', null, my == null ? '–' : my + ' år'), h('span', null, fullName(ref)), h('small', null, nowAge != null ? 'lever, ' + nowAge + ' år nå' : '')),
+        h('div', { class: 'st-big' }, h('b', null, fmt(avg) + ' år'), h('span', null, 'snitt i utvalget'), h('small', null, 'median ' + fmt(med) + ' · ' + vs[0] + '–' + vs[n - 1] + ' · ' + plural(n, 'person', 'personer')))),
+        hist, h('div', { class: 'cmp-ax' }, h('span', null, lo + ' år'), h('span', null, hi + ' år')),
+        h('p', { class: 'fnote' }, note + ' Trykk på en søyle for å se hvem det er.'));
+      root.append(card);
+    });
+    root.append(h('p', { class: 'fnote' }, 'Utvalget er ' + word[0] + ' (alle ' + (F ? 'kvinner' : 'menn') + ' som er forfedre til ' + (ref.given || 'hovedpersonen') + ') og alle deres ' + word[1] + ', også de som ikke er i rett linje. Bare personer med fødselsår og registrert hendelse er med i hvert tall. Ekteskap og samboerskap hentes fra «Fra år» på forholdet.'));
   }
 };
 
@@ -4252,11 +4380,11 @@ const BookView = {
 /* ====== Appskall ====== */
 const App = {
   view: 'register', arg: null, cur: null,
-  views: { register: RegisterView, person: PersonView, tree: TreeView, map: MapView, photos: Photos, ancestors: AncestorsView, descendants: DescendantsView, book: BookView, stats: StatsView, kinship: KinshipView, places: PlacesView, place: PlaceView, quality: QualityView, timeline: TimelineView },
-  tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', places: 'register', place: 'register', quality: 'register', timeline: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
+  views: { register: RegisterView, person: PersonView, tree: TreeView, map: MapView, photos: Photos, ancestors: AncestorsView, descendants: DescendantsView, book: BookView, stats: StatsView, kinship: KinshipView, places: PlacesView, place: PlaceView, quality: QualityView, timeline: TimelineView, compare: CompareView },
+  tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', places: 'register', place: 'register', quality: 'register', timeline: 'register', compare: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
-    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '01.11 09:00')); } catch (_) {}
+    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '01.11 11:59')); } catch (_) {}
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
@@ -4269,7 +4397,7 @@ const App = {
     let v = 'register', a = null;
     try {
       const hs = (location.hash || '').replace('#', '');
-      if (hs === 'tre') v = 'tree'; else if (hs === 'kart') v = 'map'; else if (hs === 'bilder') v = 'photos'; else if (hs === 'bok') v = 'book'; else if (hs === 'statistikk') v = 'stats'; else if (hs === 'slektskap') v = 'kinship'; else if (hs === 'steder') v = 'places'; else if (hs === 'kvalitet') v = 'quality'; else if (hs === 'tidslinje') v = 'timeline'; else if (hs.startsWith('tidslinje-')){ v = 'timeline'; a = hs.slice(10); } else if (hs.startsWith('sted-')){ v = 'place'; try { a = decodeURIComponent(hs.slice(5)); } catch (_) { a = hs.slice(5); } }
+      if (hs === 'tre') v = 'tree'; else if (hs === 'kart') v = 'map'; else if (hs === 'bilder') v = 'photos'; else if (hs === 'bok') v = 'book'; else if (hs === 'statistikk') v = 'stats'; else if (hs === 'slektskap') v = 'kinship'; else if (hs === 'steder') v = 'places'; else if (hs === 'kvalitet') v = 'quality'; else if (hs === 'tidslinje') v = 'timeline'; else if (hs.startsWith('sammenlign-')){ v = 'compare'; a = hs.slice(11); } else if (hs.startsWith('tidslinje-')){ v = 'timeline'; a = hs.slice(10); } else if (hs.startsWith('sted-')){ v = 'place'; try { a = decodeURIComponent(hs.slice(5)); } catch (_) { a = hs.slice(5); } }
       else if (hs.startsWith('aner-')){ v = 'ancestors'; a = hs.slice(5); } else if (hs.startsWith('etterkommere-')){ v = 'descendants'; a = hs.slice(13); }
       else if (hs.startsWith('p-')){ v = 'person'; a = hs.slice(2); }
     } catch (_) {}
