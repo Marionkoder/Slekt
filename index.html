@@ -592,6 +592,30 @@ button.ds-t:hover{background:var(--surface-2)}
 .tl-evstat .st-bar .v{text-align:right;white-space:normal;min-width:0}
 .tl-evstat .st-bar .v small{display:block;font-size:12px}
 
+.tl-evstat .st-bar2{display:grid;gap:3px;margin-top:10px}
+.tl-evstat .st-bar2 .l2{font-size:14px;color:var(--ink-2);overflow-wrap:anywhere}
+.tl-evstat .st-bar2 .st-bar{grid-template-columns:minmax(0,1fr) 92px}
+
+.st-bar.click,.st-bar2.click{cursor:pointer;border-radius:8px}
+.st-bar.click:hover,.st-bar2.click:hover{background:var(--surface-2)}
+.st-bar.click:focus-visible,.st-bar2.click:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pplist .pp-rows{display:grid;gap:4px}
+.pp-row{display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap;text-align:left;width:100%;min-width:0;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:9px 12px;font:inherit;color:var(--ink);cursor:pointer}
+.pp-row:hover{border-color:var(--accent)}
+.pp-n{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.pp-s{color:var(--ink-3);font-size:13px;font-variant-numeric:tabular-nums}
+
+.cmp-card .st-bigs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:14px}
+.cmp-hist{display:flex;align-items:flex-end;gap:2px;height:84px;margin-top:14px;border-bottom:1px solid var(--line)}
+.cmp-bin{flex:1 1 0;min-width:2px;height:100%;display:flex;align-items:flex-end;border-radius:3px 3px 0 0}
+.cmp-bin i{display:block;width:100%;background:var(--ink-3);opacity:.55;border-radius:3px 3px 0 0}
+.cmp-bin.has{cursor:pointer}
+.cmp-bin.has:hover i{opacity:.9}
+.cmp-bin.me{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)}
+.cmp-bin.me i{background:var(--accent);opacity:1;min-height:4px}
+.cmp-bin:focus-visible{outline:2px solid var(--accent)}
+.cmp-ax{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-3);margin-top:3px}
+
 /* Bokside: hvitt A4-ark med faste mål, uavhengig av tema. */
 .page{position:relative;width:210mm;height:296.6mm;background:#fff;color:#1c1b19;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:10.5pt;line-height:1.42;overflow:hidden;box-sizing:border-box;padding:16mm 18mm 0 18mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;text-align:left}
 .page *{box-sizing:border-box}
@@ -671,9 +695,9 @@ button.ds-t:hover{background:var(--surface-2)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
-<script src="data-world.js?v=202611010900"></script>
-<script src="data-kom.js?v=202611010900"></script>
-<script src="data-gaz.js?v=202611010900"></script>
-<script src="app.js?v=202611010900"></script>
+<script src="data-world.js?v=202611011159"></script>
+<script src="data-kom.js?v=202611011159"></script>
+<script src="data-gaz.js?v=202611011159"></script>
+<script src="app.js?v=202611011159"></script>
 </body>
 </html>
