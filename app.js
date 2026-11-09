@@ -78,9 +78,19 @@ function lifeSpan(p){
   if (d == null) return (b != null ? b : '?') + (NOW_YEAR - (b || 0) > 105 ? ' –' : ' –');
   return (b != null ? b : '?') + ' – ' + d;
 }
+/* Hele år mellom to datoer {y, m, d}. Måned og dag brukes når begge er kjent, ellers bare årstall. */
+function yearsBetween(a, b){
+  if (!a || !b || a.y == null || b.y == null) return null;
+  let n = b.y - a.y;
+  if (a.m && b.m && (b.m < a.m || (b.m === a.m && a.d && b.d && b.d < a.d))) n--;
+  return n;
+}
+const ageAtDeath = p => yearsBetween(dateOf(p, 'birth'), dateOf(p, 'death'));
+const ageAtBirthOf = (p, c) => yearsBetween(dateOf(p, 'birth'), dateOf(c, 'birth'));
+const ageNow = p => { const t = new Date(); return yearsBetween(dateOf(p, 'birth'), { y: t.getFullYear(), m: t.getMonth() + 1, d: t.getDate() }); };
 function ageText(p){
-  if (p.birthYear != null && p.deathYear != null) return (p.deathYear - p.birthYear) + ' år';
-  if (p.birthYear != null && p.deathYear == null && !isDead(p) && NOW_YEAR - p.birthYear <= 105) return NOW_YEAR - p.birthYear + ' år';
+  if (p.birthYear != null && p.deathYear != null) return ageAtDeath(p) + ' år';
+  if (p.birthYear != null && p.deathYear == null && !isDead(p) && NOW_YEAR - p.birthYear <= 105) return ageNow(p) + ' år';
   return '';
 }
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
@@ -338,8 +348,9 @@ const Idx = {
 };
 
 const DEFAULT_EVENTS = [{ id: 'penicillin', title: 'Penicillin blir tatt i allmenn bruk i Norge', year: 1946, month: 12, day: null, on: true }];
+const DEFAULT_PHOTO_TYPES = ['Portrett', 'Klassebilde', 'Bryllupsbilde', 'Familiebilde', 'Hverdagsbilde'];
 const Store = {
-  persons: new Map(), photos: new Map(), events: null, db: null, assets: null, canWrite: true, mode: 'loading',
+  persons: new Map(), photos: new Map(), events: null, photoTypes: null, db: null, assets: null, canWrite: true, mode: 'loading',
   listeners: new Set(), _raf: 0,
   onChange(fn){ this.listeners.add(fn); return () => this.listeners.delete(fn); },
   emit(){
@@ -377,7 +388,7 @@ const Store = {
       this.ready = true; this.emit();
     }, fail);
     db.collection('meta').onSnapshot(snap => {
-      snap.docChanges().forEach(ch => { if (ch.doc.id === 'events' && ch.type !== 'removed'){ const d = ch.doc.data(); if (d && Array.isArray(d.list)) this.events = d.list; } });
+      snap.docChanges().forEach(ch => { if (ch.type === 'removed') return; const d = ch.doc.data(); if (!d || !Array.isArray(d.list)) return; if (ch.doc.id === 'events') this.events = d.list; else if (ch.doc.id === 'photoTypes') this.photoTypes = d.list; });
       this.emit();
     }, fail);
     db.collection('photos').onSnapshot(snap => {
@@ -399,6 +410,14 @@ const Store = {
     if (LOCAL_MODE){ try { await LocalDB.del(coll, id); noteChange(); } catch (e){ console.error(e); toast('Kunne ikke slette.'); } return; }
     if (!this.db) return;
     try { await this.db.collection(coll).doc(id).delete(); } catch (e){ console.error(e); toast('Kunne ikke slette.'); }
+  },
+  /* Fototyper (egen liste som kan utvides) */
+  photoTypeList(){ return this.photoTypes || DEFAULT_PHOTO_TYPES; },
+  async savePhotoTypes(list){
+    this.photoTypes = list.slice(); this.emit();
+    if (LOCAL_MODE){ try { await LocalDB.put('meta', 'photoTypes', { list: this.photoTypes }); noteChange(); } catch (e){ console.error(e); toast('Kunne ikke lagre typene.'); } return; }
+    if (!this.db) return;
+    try { await this.db.collection('meta').doc('photoTypes').set({ list: this.photoTypes }); } catch (e){ console.error(e); toast('Kunne ikke lagre typene.'); }
   },
   /* Historiske hendelser (egen liste, vises i tidslinjen) */
   evList(){ return this.events || DEFAULT_EVENTS; },
@@ -644,8 +663,9 @@ Store.initLocal = async function(){
     upload: async blob => { const id = uid(); await LocalDB.put('blobs', id, blob); URLS.set(id, URL.createObjectURL(blob)); noteChange(); return { id, url: URLS.get(id), sizeBytes: blob.size, contentType: blob.type }; },
     delete: async id => { await LocalDB.del('blobs', id); const u = URLS.get(id); if (u) URL.revokeObjectURL(u); URLS.delete(id); }
   };
-  const [ps, phs, blobs, evr] = await Promise.all([LocalDB.all('persons'), LocalDB.all('photos'), LocalDB.all('blobs'), LocalDB.get('meta', 'events')]);
+  const [ps, phs, blobs, evr, ptr] = await Promise.all([LocalDB.all('persons'), LocalDB.all('photos'), LocalDB.all('blobs'), LocalDB.get('meta', 'events'), LocalDB.get('meta', 'photoTypes')]);
   if (evr && Array.isArray(evr.list)) this.events = evr.list;
+  if (ptr && Array.isArray(ptr.list)) this.photoTypes = ptr.list;
   ps.forEach(([k, v]) => this.persons.set(k, Object.assign({}, v, { id: k })));
   phs.forEach(([k, v]) => this.photos.set(k, Object.assign({}, v, { id: k })));
   blobs.forEach(([k, b]) => URLS.set(k, URL.createObjectURL(b)));
@@ -754,6 +774,7 @@ async function assetBlob(id){
 async function makeBackup(onProgress){
   const docs = { app: 'slektsboka', version: 1, exported: new Date().toISOString(), persons: [...Store.persons.values()], photos: [] };
   if (Store.events) docs.events = Store.events;
+  if (Store.photoTypes) docs.photoTypes = Store.photoTypes;
   const items = [], missing = [], photos = [...Store.photos.values()];
   for (let i = 0; i < photos.length; i++){
     const ph = photos[i];
@@ -806,6 +827,11 @@ async function importBackup(file, mode, onProgress){
     await LocalDB.clear('persons'); await LocalDB.clear('photos'); await LocalDB.clear('blobs');
     URLS.forEach(u => URL.revokeObjectURL(u)); URLS.clear();
   }
+  if (Array.isArray(data.photoTypes)){
+    const cur = mode === 'replace' ? [] : Store.photoTypeList().slice();
+    data.photoTypes.forEach(t => { if (!cur.includes(t)) cur.push(t); });
+    Store.photoTypes = cur; await LocalDB.put('meta', 'photoTypes', { list: cur });
+  } else if (mode === 'replace'){ Store.photoTypes = null; await LocalDB.del('meta', 'photoTypes'); }
   if (Array.isArray(data.events)){
     const cur = mode === 'replace' ? [] : Store.evList().slice();
     data.events.forEach(e => { const i = cur.findIndex(x => x.id === e.id); if (i >= 0) cur[i] = e; else cur.push(e); });
@@ -2546,8 +2572,28 @@ function openCropEditor(photoId, onDone, pg = 0){
   drawRatios(); draw();
 }
 
+/* Typer bilder kan merkes med (Portrett, Klassebilde …). Egne typer kan legges til. */
+function openPhotoTypes(onDone){
+  let list = Store.photoTypeList().slice();
+  const body = h('div', { class: 'modal-b' });
+  const used = t => [...Store.photos.values()].filter(p => !isSource(p) && p.ptype === t).length;
+  const save = async () => { await Store.savePhotoTypes(list); if (onDone) onDone(); };
+  const draw = () => {
+    clear(body);
+    const inp = h('input', { class: 'inp', placeholder: 'Ny type, f.eks. Konfirmasjonsbilde', 'aria-label': 'Ny type', maxlength: 40 });
+    const add = async () => { const t = inp.value.trim(); if (!t) return; if (list.some(x => x.toLowerCase() === t.toLowerCase())){ toast('Typen finnes allerede.'); return; } list.push(t); await save(); draw(); };
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); add(); } });
+    body.append(h('p', { class: 'muted' }, 'Typene kan velges på hvert bilde og brukes til å sortere albumet.'),
+      h('div', { class: 'ev-list' }, list.length ? list.map(t => h('div', { class: 'ev-row' }, h('span', null, t, h('small', { class: 'faint' }, ' ' + used(t) + ' bilder')),
+        h('button', { class: 'btn sm ghost', 'aria-label': 'Fjern ' + t, onclick: async () => { list = list.filter(x => x !== t); await save(); draw(); } }, ico('trash', 16)))) : h('p', { class: 'muted' }, 'Ingen typer.')),
+      h('div', { style: { display: 'flex', gap: '8px', marginTop: '10px' } }, inp, h('button', { class: 'btn primary', onclick: add }, 'Legg til')),
+      h('p', { class: 'fnote' }, 'Fjerner du en type, beholder bildene som har den navnet sitt, men typen vises ikke lenger i listen.'));
+  };
+  draw();
+  openModal('Typer bilder', body);
+}
 const Photos = {
-  filter: '', tab: 'photo',
+  filter: '', tab: 'photo', sortBy: 'tid', geo: 'kom', typeF: '',
   mount(root){
     this.root = root;
     this.fileIn = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true, onchange: e => { this.uploadFiles([...e.target.files], { kind: this.tab }); e.target.value = ''; } });
@@ -2574,24 +2620,57 @@ const Photos = {
         h('option', { value: '' }, src ? 'Alle kilder' : 'Alle bilder'), [...tagged].map(i => Store.persons.get(i)).filter(Boolean).sort(nameCmp).map(p => h('option', { value: p.id, selected: p.id === this.filter }, (src ? 'Nevner ' : 'Med ') + fullName(p))));
       this.tools.appendChild(sel);
     } else this.filter = '';
-    this.tools.style.display = tagged.size ? '' : 'none';
+    if (!src && all.length){
+      const types = Store.photoTypeList().slice(); all.forEach(ph => { if (ph.ptype && !types.includes(ph.ptype)) types.push(ph.ptype); });
+      this.tools.appendChild(h('select', { class: 'inp', style: { width: 'auto', maxWidth: '100%' }, 'aria-label': 'Filtrer på type', onchange: e => { this.typeF = e.target.value; this.update(); } },
+        h('option', { value: '' }, 'Alle typer'), types.map(t => h('option', { value: t, selected: t === this.typeF }, t)), h('option', { value: '-', selected: this.typeF === '-' }, 'Uten type')));
+      this.tools.appendChild(h('div', { class: 'seg', role: 'group', 'aria-label': 'Sorter og grupper' }, [['tid', 'Tid'], ['tiar', 'Tiår'], ['geo', 'Sted'], ['type', 'Type']].map(([k, t]) => h('button', { type: 'button', 'aria-pressed': String(this.sortBy === k), onclick: () => { this.sortBy = k; this.update(); } }, t))));
+      if (this.sortBy === 'geo') this.tools.appendChild(h('select', { class: 'inp', style: { width: 'auto', maxWidth: '100%' }, 'aria-label': 'Nivå for sted', onchange: e => { this.geo = e.target.value; this.update(); } },
+        [['land', 'Land'], ['fylke', 'Fylke'], ['kom', 'Kommune'], ['gard', 'Gård eller sted']].map(([k, t]) => h('option', { value: k, selected: this.geo === k }, t))));
+      if (Store.canWrite) this.tools.appendChild(h('button', { type: 'button', class: 'btn sm', onclick: () => openPhotoTypes(() => this.update()) }, 'Typer'));
+    }
+    this.tools.style.display = (tagged.size || (!src && all.length)) ? '' : 'none';
     clear(this.body);
     let rows = this.filter ? all.filter(ph => (ph.tags || []).some(t => t.pid === this.filter)) : all;
+    if (!src && this.typeF) rows = rows.filter(ph => this.typeF === '-' ? !ph.ptype : ph.ptype === this.typeF);
     if (!all.length){
       this.body.appendChild(h('div', { class: 'empty' }, h('h2', null, src ? 'Ingen kilder ennå' : 'Ingen bilder ennå'),
         h('p', null, !Store.assets ? 'Opplasting er ikke tilgjengelig i denne visningen.' : src ? 'Fotografer eller skann sidene som dokumenterer slekten. Du kan merke av hvor hver person står i teksten, og skille kildene fra fotografiene.' : 'Last opp gamle portretter, gruppebilder eller bilder av gårder og steder. Du kan tagge hver person ved å trykke på ansiktet.'),
         (Store.canWrite && Store.assets) ? h('button', { class: 'btn primary', onclick: () => this.fileIn.click() }, ico('upload', 18), src ? 'Last opp kilder' : 'Last opp bilder') : null));
       return;
     }
-    const ids = rows.map(r => r.id);
-    this.body.appendChild(h('div', { class: 'gal' }, rows.map(ph => {
+    const thumb = (ph, ids) => {
       const names = (ph.tags || []).map(t => Store.persons.get(t.pid)).filter(Boolean).map(p => p.given || fullName(p));
       return h('button', { class: 'thumb' + (src ? ' doc' : ''), 'aria-label': ph.caption || ph.ref || 'Åpne', onclick: () => this.open(ph.id, { list: ids }) },
         h('img', { src: photoUrl(ph), alt: ph.caption || '', loading: 'lazy', style: ph.w && ph.h ? { aspectRatio: ph.w + '/' + ph.h } : {} }),
-        src ? h('span', { class: 'badge top' }, ph.srcType || 'Kilde') : null,
+        src ? h('span', { class: 'badge top' }, ph.srcType || 'Kilde') : (ph.ptype && this.sortBy !== 'type' ? h('span', { class: 'badge top' }, ph.ptype) : null),
         (ph.tags || []).length ? h('span', { class: 'tg' }, ico('tag', 13), String(ph.tags.length)) : null,
         h('span', { class: 'cap' }, [yearLabel(ph), ph.place && noPlace(ph.place.name), (src ? (ph.ref || ph.caption) : ph.caption) || names.slice(0, 3).join(', '), pagesOf(ph).length > 1 ? pagesOf(ph).length + ' sider' : null].filter(Boolean).join(' · ') || ' '));
-    })));
+    };
+    if (!rows.length){ this.body.appendChild(h('div', { class: 'empty' }, h('h2', null, 'Ingen bilder med dette valget'))); return; }
+    // grupper
+    let groups = [{ head: null, rows }];
+    if (!src && this.sortBy !== 'tid'){
+      const m = new Map(), none = this.sortBy === 'tiar' ? 'Uten årstall' : this.sortBy === 'geo' ? 'Uten sted' : 'Uten type';
+      rows.forEach(ph => {
+        let k = null;
+        if (this.sortBy === 'tiar') k = ph.year != null ? Math.floor(ph.year / 10) * 10 : null;
+        else if (this.sortBy === 'geo') k = ph.place && ph.place.name ? (placeLevels(ph.place)[this.geo] || (this.geo === 'gard' ? noPlace(ph.place.name) : null)) : null;
+        else k = ph.ptype || null;
+        if (!m.has(k)) m.set(k, []); m.get(k).push(ph);
+      });
+      const keys = [...m.keys()].filter(k => k != null);
+      if (this.sortBy === 'tiar') keys.sort((a, b) => a - b);
+      else if (this.sortBy === 'geo') keys.sort((a, b) => String(a).localeCompare(String(b), 'nb'));
+      else { const tl = Store.photoTypeList(); keys.sort((a, b) => { const x = tl.indexOf(a), y = tl.indexOf(b); return (x < 0 ? 999 : x) - (y < 0 ? 999 : y) || String(a).localeCompare(String(b), 'nb'); }); }
+      groups = keys.map(k => ({ head: this.sortBy === 'tiar' ? k + '-tallet' : String(k), rows: m.get(k) }));
+      if (m.has(null)) groups.push({ head: none, rows: m.get(null) });
+    }
+    const ids = groups.flatMap(g => g.rows.map(r => r.id));
+    groups.forEach(g => {
+      if (g.head != null) this.body.appendChild(h('h2', { class: 'gal-h' }, g.head, h('small', null, ' ' + g.rows.length)));
+      this.body.appendChild(h('div', { class: 'gal' }, g.rows.map(ph => thumb(ph, ids))));
+    });
   },
   unmount(){},
   async uploadFiles(files, o = {}){
@@ -2639,6 +2718,10 @@ const Photos = {
     const caption = h('input', { class: 'inp', type: 'text', placeholder: 'Bildetekst, f.eks. «Familien samlet på Haugen»', 'aria-label': 'Bildetekst', onchange: e => save({ caption: e.target.value }) });
     const refInp = h('input', { class: 'inp', type: 'text', placeholder: 'f.eks. Voss prestearkiv, klokkerbok 1866, s. 42', 'aria-label': 'Kildehenvisning', onchange: e => save({ ref: e.target.value }) });
     const typeSel = h('select', { class: 'inp', 'aria-label': 'Type kilde', onchange: e => save({ srcType: e.target.value }) }, SOURCE_TYPES.map(t => h('option', { value: t }, t)));
+    const mkPType = p => { const cur = p.ptype || '', list = Store.photoTypeList().slice(); if (cur && !list.includes(cur)) list.push(cur);
+      return h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, h('select', { class: 'inp', 'aria-label': 'Type bilde', style: { flex: '1 1 auto', minWidth: 0 }, onchange: e => save({ ptype: e.target.value || undefined }) },
+        h('option', { value: '' }, 'Ingen type'), list.map(t => h('option', { value: t, selected: t === cur }, t))),
+        h('button', { type: 'button', class: 'btn sm', onclick: () => openPhotoTypes(() => render()) }, 'Typer')); };
     const year = h('input', { class: 'inp', type: 'text', inputmode: 'numeric', placeholder: 'Årstall', 'aria-label': 'Årstall for bildet', style: { maxWidth: '170px' }, onchange: e => { const p = photo(); if (p && !isSource(p)){ const r = parsePhotoYear(e.target.value); save({ year: r.year, decade: r.decade || undefined }); } else save({ year: intOrNull(e.target.value) }); } });
     const nav = h('div', { class: 'pvnav' });
     const photo = () => Store.photos.get(cur);
@@ -2744,7 +2827,7 @@ const Photos = {
       if (edit){
         if (srcMode) side.appendChild(h('div', { class: 'fgrid' }, h('div', { class: 'half-m' }, h('label', { class: 'lbl' }, 'Type kilde'), typeSel), h('div', { class: 'half-m' }, h('label', { class: 'lbl' }, 'Årstall for dokumentet'), year),
           h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Henvisning'), refInp), h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Notat om kilden'), caption)));
-        else side.appendChild(h('div', { class: 'fgrid' }, h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Bildetekst'), caption), h('div', null, h('label', { class: 'lbl' }, 'Årstall'), year), h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Sted (valgfritt)'), photoPlace(p))));
+        else side.appendChild(h('div', { class: 'fgrid' }, h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Bildetekst'), caption), h('div', null, h('label', { class: 'lbl' }, 'Årstall'), year), h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Type'), mkPType(p)), h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Sted (valgfritt)'), photoPlace(p))));
         let armed = false;
         const del = h('button', { class: 'btn danger sm', onclick: async () => {
           if (!armed){ armed = true; del.classList.add('sure'); del.lastChild.textContent = 'Trykk igjen for å slette'; setTimeout(() => { armed = false; del.classList.remove('sure'); del.lastChild.textContent = 'Slett bilde'; }, 4000); return; }
@@ -2979,10 +3062,10 @@ const StatsView = {
 
     // levealder
     const noAcc = this.noAcc;
-    const ages = sx => pool.filter(sx).filter(p => !(noAcc && isAccident(p))).filter(p => p.birthYear != null && p.deathYear != null && p.deathYear >= p.birthYear).map(p => p.deathYear - p.birthYear);
+    const ages = sx => pool.filter(sx).filter(p => !(noAcc && isAccident(p))).filter(p => p.birthYear != null && p.deathYear != null && p.deathYear >= p.birthYear).map(p => ageAtDeath(p));
     const lifeRows = sexes.map(([l, f]) => { const a = ages(f), ad = a.filter(x => x >= 15), a50 = a.filter(x => x >= 50); return [l, a.length, fmt(avg(a)), fmt(med(a)), fmt(avg(ad)), fmt(avg(a50)) + (a50.length ? ' (' + a50.length + ')' : ''), a.length ? Math.min(...a) + ' – ' + Math.max(...a) : '–']; });
     const allAges = ages(() => true);
-    const agedP = pool.filter(p => !(noAcc && isAccident(p)) && p.birthYear != null && p.deathYear != null && p.deathYear >= p.birthYear), ageOf = p => p.deathYear - p.birthYear;
+    const agedP = pool.filter(p => !(noAcc && isAccident(p)) && p.birthYear != null && p.deathYear != null && p.deathYear >= p.birthYear), ageOf = p => ageAtDeath(p);
     const bins = []; for (let b = 0; b < 100; b += 10) bins.push([b + '–' + (b + 9), allAges.filter(x => x >= b && x < b + 10).length, agedP.filter(p => ageOf(p) >= b && ageOf(p) < b + 10), p => ageOf(p) + ' år']);
     bins.push(['100+', allAges.filter(x => x >= 100).length, agedP.filter(p => ageOf(p) >= 100), p => ageOf(p) + ' år']);
     const accN = pool.filter(p => isAccident(p) && p.birthYear != null && p.deathYear != null).length;
@@ -3011,7 +3094,7 @@ const StatsView = {
       h('p', { class: 'fnote' }, 'Personer uten registrerte barn telles bare med hvis du har krysset av for «Ingen kjente barn». Ellers vet ikke appen om de ikke fikk barn eller om barna bare ikke er lagt inn. Barn regnes under begge juridiske foreldre. Donor telles ikke.'));
 
     // alder ved første og yngste barn
-    const ageAt = (sx, pick) => pool.filter(sx).filter(p => p.birthYear != null).map(p => { const ys = Idx.kidsOf(p.id).map(c => c.birthYear).filter(y => y != null); return ys.length ? pick(ys) - p.birthYear : null; }).filter(x => x != null && x >= 10 && x <= 80);
+    const ageAt = (sx, pick) => pool.filter(sx).filter(p => p.birthYear != null).map(p => { const ys = Idx.kidsOf(p.id).filter(c => c.birthYear != null).map(c => ageAtBirthOf(p, c)).filter(x => x != null); return ys.length ? pick(ys) : null; }).filter(x => x != null && x >= 10 && x <= 80);
     const ageCard = (title, pick, note) => {
       const rows = [['Kvinner', p => p.sex === 'f'], ['Menn', p => p.sex === 'm']].map(([l, f]) => { const s = sum(l, ageAt(f, pick)); return [l, s.n, fmt(s.avg), fmt(s.med), s.n ? s.min + ' – ' + s.max : '–']; });
       const has = rows.some(r => r[1]);
@@ -3278,7 +3361,7 @@ const PlaceView = {
     if (!e){ root.append(back, h('div', { class: 'empty' }, h('h2', null, 'Ingen registrerte hendelser her'), h('p', null, 'Ingen er lenger knyttet til dette stedet.'))); return; }
     const by = t => e.ev.filter(x => x.type === t);
     const P = id => Store.persons.get(id);
-    const ageOf = p => p && p.birthYear != null && p.deathYear != null && p.deathYear >= p.birthYear ? p.deathYear - p.birthYear : null;
+    const ageOf = p => p && p.birthYear != null && p.deathYear != null && p.deathYear >= p.birthYear ? ageAtDeath(p) : null;
     const avg = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length * 10) / 10 : null;
     const bornAges = [...new Set(by('født').map(x => x.pid))].map(id => ageOf(P(id))).filter(x => x != null);
     const diedAges = [...new Set(by('døde').map(x => x.pid))].map(id => ageOf(P(id))).filter(x => x != null);
@@ -3416,7 +3499,7 @@ function runChecks(){
       const par = id && Store.persons.get(id); if (!par) return;
       if (id === p.id) return;
       if (b != null && par.birthYear != null){
-        const gap = b - par.birthYear;
+        const gap = ageAtBirthOf(par, p);
         if (gap < 15) push('forelder-ung', 'feil', p, nm(par) + ' (' + role + ') var bare ' + gap + ' år da ' + (p.given || 'personen') + ' ble født.', id);
         else if (!p.adopted && ((role === 'mor' && gap > 48) || (role !== 'mor' && gap > 62))) push('forelder-gammel', 'advarsel', p, nm(par) + ' (' + role + ') var ' + gap + ' år da ' + (p.given || 'personen') + ' ble født.', id);
       }
@@ -3618,7 +3701,7 @@ function evYoung(ids, e, lim, noAcc){
     if (p.deathYear == null || p.deathYear < p.birthYear) return;
     const dt = ptT(p, 'death'); if (dt == null) return;
     if (noAcc && isAccident(p)){ g.skipped++; return; }
-    const k = dt >= cut ? g.after : g.before; k.n++; const yg = p.deathYear - p.birthYear < lim; if (yg) k.y++; k.list.push({ p, age: p.deathYear - p.birthYear, y: yg }); });
+    const k = dt >= cut ? g.after : g.before; k.n++; const ag = ageAtDeath(p), yg = ag < lim; if (yg) k.y++; k.list.push({ p, age: ag, y: yg }); });
   return g;
 }
 const TL_LEVELS = [['land', 'Land'], ['fylke', 'Fylke / region'], ['kom', 'Kommune eller sted'], ['gard', 'Gård']];
@@ -3803,13 +3886,13 @@ const CompareView = {
     Store.persons.forEach(o => (o.partners || []).forEach(pt => { if (pt.id){ if (!inc.has(pt.id)) inc.set(pt.id, []); inc.get(pt.id).push({ oid: o.id, pt }); } }));
     return p => {
       const out = {}, b = p.birthYear; if (b == null) return out;
-      const ys = Idx.kidsOf(p.id).map(c => c.birthYear).filter(y => y != null); if (ys.length) out.child = Math.min(...ys) - b;
+      const ys = Idx.kidsOf(p.id).filter(c => c.birthYear != null).map(c => ageAtBirthOf(p, c)).filter(x => x != null); if (ys.length) out.child = Math.min(...ys);
       const rel = new Map();
       const add = (oid, pt) => { const k = pt.kind || (pt.year != null ? 'gift' : 'partner'), cur = rel.get(oid); if (!cur || (cur.year == null && pt.year != null)) rel.set(oid, { kind: k, year: pt.year }); };
       (p.partners || []).forEach(pt => pt.id && add(pt.id, pt)); (inc.get(p.id) || []).forEach(x => add(x.oid, x.pt));
       const yr = kind => { const a = [...rel.values()].filter(r => r.kind === kind && r.year != null).map(r => r.year); return a.length ? Math.min(...a) - b : null; };
       const g = yr('gift'), s = yr('samboer'); if (g != null) out.gift = g; if (s != null) out.samb = s;
-      if (p.deathYear != null && p.deathYear >= b && !(this.noAcc && isAccident(p))) out.life = p.deathYear - b;
+      if (p.deathYear != null && p.deathYear >= b && !(this.noAcc && isAccident(p))) out.life = ageAtDeath(p);
       return out;
     };
   },
@@ -3836,7 +3919,7 @@ const CompareView = {
     CMP_METRICS.forEach(M => {
       const list = rows.filter(r => r.v[M.k] != null && M.ok(r.v[M.k])).map(r => ({ p: r.p, v: r.v[M.k] })), my = mine[M.k] != null && M.ok(mine[M.k]) ? mine[M.k] : null;
       const card = h('section', { class: 'card cmp-card' }, h('h2', null, M.t));
-      const nowAge = M.k === 'life' && my == null && !isDead(ref) && ref.birthYear != null ? NOW_YEAR - ref.birthYear : null;
+      const nowAge = M.k === 'life' && my == null && !isDead(ref) && ref.birthYear != null ? ageNow(ref) : null;
       if (!list.length){ card.append(h('p', { class: 'muted' }, 'Ingen i utvalget har dette registrert ennå.')); root.append(card); return; }
       const vs = list.map(x => x.v).sort((a, b) => a - b), n = vs.length, avg = vs.reduce((a, b) => a + b, 0) / n, med = n % 2 ? vs[n >> 1] : (vs[n / 2 - 1] + vs[n / 2]) / 2;
       const lo = Math.min(...vs, my == null ? 1e9 : my), hi = Math.max(...vs, my == null ? -1e9 : my);
@@ -3866,13 +3949,13 @@ const CompareView = {
 };
 
 /* ====== Bok til utskrift (A4) ====== */
-const BOOK_CSS = "/* Bokside: hvitt A4-ark med faste m\u00e5l, uavhengig av tema. */\n.page{position:relative;width:210mm;height:296.6mm;background:#fff;color:#1c1b19;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:10.5pt;line-height:1.42;overflow:hidden;box-sizing:border-box;padding:16mm 18mm 0 18mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;text-align:left}\n.page *{box-sizing:border-box}\n.pg-body{width:174mm;height:259mm;overflow:hidden;position:relative}\n.pg-foot{position:absolute;left:18mm;right:18mm;bottom:9mm;display:flex;justify-content:space-between;gap:10mm;font:8.5pt/1.2 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;border-top:.3mm solid #d9d5cb;padding-top:2mm}\n.pg-foot span:last-child{font-variant-numeric:tabular-nums}\n.bk-cover{height:259mm;display:flex;flex-direction:column;justify-content:center;gap:8mm;padding-bottom:20mm}\n.bk-cover .rule{width:34mm;height:1.4mm;background:#8a5a3c}\n.bk-cover h1{font:600 44pt/1.02 'Newsreader',Georgia,serif;letter-spacing:-.02em;margin:0;overflow-wrap:anywhere}\n.bk-cover .sub{font:italic 400 17pt/1.3 'Newsreader',Georgia,serif;color:#4c4a45;margin:0}\n.bk-cover .meta{font:9.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin:0}\n.bk-h1{font:600 24pt/1.1 'Newsreader',Georgia,serif;letter-spacing:-.015em;margin:0 0 5mm;padding-bottom:3mm;border-bottom:.5mm solid #8a5a3c}\n.bk-h2{font:600 19pt/1.12 'Newsreader',Georgia,serif;letter-spacing:-.01em;margin:0}\n.bk-sec{font:600 7.5pt/1.2 'Schibsted Grotesk',system-ui,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:#8a5a3c;margin:5mm 0 1.6mm}\n.bk-ph{display:flex;gap:5mm;align-items:center;padding-top:2mm;margin-top:2mm;border-top:.3mm solid #d9d5cb}\n.bk-ph.first{border-top:0;margin-top:0;padding-top:0}\n.bk-ph .av{border:.3mm solid #d9d5cb;background:#efece4;color:#5a5750;box-shadow:none}\n.bk-ph .t{min-width:0}\n.bk-life{font:9.5pt/1.3 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;margin-top:1mm;font-variant-numeric:tabular-nums}\n.bk-facts{display:grid;grid-template-columns:24mm 1fr;gap:1mm 4mm;margin:2mm 0 0}\n.bk-facts dt{font:600 8.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-facts dd{margin:0;overflow-wrap:anywhere}\n.bk-fam{display:grid;grid-template-columns:24mm 1fr;gap:1mm 4mm;margin:1mm 0 0}\n.bk-fam b{font:600 8.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-fam div{overflow-wrap:anywhere}\n.pref{display:inline-block;margin-left:.3em;min-width:3.6em;font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;white-space:nowrap}\n.bk-ev{display:grid;grid-template-columns:13mm 1fr;gap:.6mm 3mm;margin:0}\n.bk-ev .y{font:600 9pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;text-align:right;font-variant-numeric:tabular-nums}\n.bk-ev .s{font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-p{margin:0 0 2.4mm;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left}\n.bk-srcrefs{font:9pt/1.45 'Schibsted Grotesk',system-ui,sans-serif;color:#3d3b36;margin:0}\n.bk-srcrefs span.k{display:inline-block;min-width:6mm;font-weight:600;color:#8a5a3c}\n.bk-toc{display:grid;grid-template-columns:1fr auto;gap:2.4mm 6mm;margin-top:4mm;font-size:12pt}\n.bk-toc .n{font:600 10pt 'Schibsted Grotesk',system-ui,sans-serif;font-variant-numeric:tabular-nums;text-align:right;color:#5a5750}\n.bk-toc .d{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;display:block;margin-top:.4mm}\n.bk-fig{margin:0;min-width:0}\n.bk-figs{display:flex;flex-wrap:nowrap;gap:5mm;margin:0 0 5mm;align-items:flex-start}\n.bk-figs .bk-fig{flex:0 1 auto}\n.bk-figs img{display:block;object-fit:fill;background:#f3f1ec}\n.bk-figs figcaption{font:8.4pt/1.3 'Schibsted Grotesk',system-ui,sans-serif;color:#3d3b36;margin-top:1.2mm;overflow-wrap:anywhere}\n.bk-figs figcaption b{font-weight:600}\n.bk-src{margin:0 0 6mm;break-inside:avoid}\n.bk-src .hd{display:flex;gap:3mm;align-items:baseline;margin-bottom:1.4mm}\n.bk-src .hd .k{font:600 12pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c}\n.bk-src .hd .t{font:600 11pt 'Newsreader',Georgia,serif}\n.bk-src .who{font:9pt/1.4 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;margin:0 0 2mm}\n.bk-src .img{display:block;background:#f3f1ec;border:.3mm solid #e1ddd3;overflow:hidden;box-sizing:content-box;max-width:100%}\n.bk-src .img img{width:100%;height:100%;display:block;object-fit:contain}\n.bk-tbl{width:100%;border-collapse:collapse;font-size:10pt}\n.bk-tbl th{font:600 8pt 'Schibsted Grotesk',system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#77746c;text-align:left;padding:0 2mm 1.4mm 0;border-bottom:.3mm solid #cfcabc}\n.bk-tbl td{padding:1.1mm 2mm 1.1mm 0;border-bottom:.2mm solid #ece9e1;vertical-align:top}\n.bk-tbl td.n{width:11mm;font:600 9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;font-variant-numeric:tabular-nums}\n.bk-tbl td.s{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750}\n.bk-gen{font:600 9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;margin:3mm 0 1.6mm}\n.bk-desc{margin:0;font-size:10pt;line-height:1.38}\n.bk-desc div{padding-left:calc(var(--d,0)*5mm);text-indent:-3mm;margin-left:3mm;overflow-wrap:anywhere}\n.bk-desc small{font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-reg{columns:2;column-gap:8mm;font-size:10pt;line-height:1.35;margin:0}\n.bk-reg div{break-inside:avoid;display:flex;justify-content:space-between;gap:3mm;padding:.35mm 0;border-bottom:.2mm dotted #d9d5cb}\n.bk-reg .p{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;white-space:nowrap}\n.bk-svg{display:block;width:174mm;margin:0}\n.bk-note{font:8.8pt/1.4 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin:2mm 0 0}\n";
+const BOOK_CSS = "/* Bokside: hvitt A4-ark med faste m\u00e5l, uavhengig av tema. */\n.page{position:relative;width:210mm;height:296.6mm;background:#fff;color:#1c1b19;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:10.5pt;line-height:1.42;overflow:hidden;box-sizing:border-box;padding:16mm 18mm 0 18mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;text-align:left}\n.page *{box-sizing:border-box}\n.pg-body{width:174mm;height:259mm;overflow:hidden;position:relative}\n.pg-foot{position:absolute;left:18mm;right:18mm;bottom:9mm;display:flex;justify-content:space-between;gap:10mm;font:8.5pt/1.2 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;border-top:.3mm solid #d9d5cb;padding-top:2mm}\n.pg-foot span:last-child{font-variant-numeric:tabular-nums}\n.bk-cover{height:259mm;display:flex;flex-direction:column;justify-content:center;gap:8mm;padding-bottom:20mm}\n.bk-cover .rule{width:34mm;height:1.4mm;background:#8a5a3c}\n.bk-cover h1{font:600 44pt/1.02 'Newsreader',Georgia,serif;letter-spacing:-.02em;margin:0;overflow-wrap:anywhere}\n.bk-cover .sub{font:italic 400 17pt/1.3 'Newsreader',Georgia,serif;color:#4c4a45;margin:0}\n.bk-cover .meta{font:9.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin:0}\n.bk-h1{font:600 24pt/1.1 'Newsreader',Georgia,serif;letter-spacing:-.015em;margin:0 0 5mm;padding-bottom:3mm;border-bottom:.5mm solid #8a5a3c}\n.bk-h2{font:600 19pt/1.12 'Newsreader',Georgia,serif;letter-spacing:-.01em;margin:0}\n.bk-sec{font:600 7.5pt/1.2 'Schibsted Grotesk',system-ui,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:#8a5a3c;margin:5mm 0 1.6mm}\n.bk-ph{display:flex;gap:5mm;align-items:center;padding-top:2mm;margin-top:2mm;border-top:.3mm solid #d9d5cb}\n.bk-ph.first{border-top:0;margin-top:0;padding-top:0}\n.bk-ph .av{border:.3mm solid #d9d5cb;background:#efece4;color:#5a5750;box-shadow:none}\n.bk-ph .t{min-width:0}\n.bk-life{font:9.5pt/1.3 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;margin-top:1mm;font-variant-numeric:tabular-nums}\n.bk-facts{display:grid;grid-template-columns:24mm 1fr;gap:1mm 4mm;margin:2mm 0 0}\n.bk-facts dt{font:600 8.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-facts dd{margin:0;overflow-wrap:anywhere}\n.bk-fam{display:grid;grid-template-columns:24mm 1fr;gap:1mm 4mm;margin:1mm 0 0}\n.bk-fam b{font:600 8.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-fam div{overflow-wrap:anywhere}\n.pref{display:inline-block;margin-left:.3em;min-width:3.6em;font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;white-space:nowrap}\n.bk-ev{display:grid;grid-template-columns:13mm 1fr;gap:.6mm 3mm;margin:0}\n.bk-ev .y{font:600 9pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;text-align:right;font-variant-numeric:tabular-nums}\n.bk-ev .s{font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-p{margin:0 0 2.4mm;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left}\n.bk-srcrefs{font:9pt/1.45 'Schibsted Grotesk',system-ui,sans-serif;color:#3d3b36;margin:0}\n.bk-srcrefs span.k{display:inline-block;min-width:6mm;font-weight:600;color:#8a5a3c}\n.bk-toc{display:grid;grid-template-columns:1fr auto;gap:2.4mm 6mm;margin-top:4mm;font-size:12pt}\n.bk-toc .n{font:600 10pt 'Schibsted Grotesk',system-ui,sans-serif;font-variant-numeric:tabular-nums;text-align:right;color:#5a5750}\n.bk-toc .d{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;display:block;margin-top:.4mm}\n.bk-fig{margin:0;min-width:0}\n.bk-figs{display:flex;flex-wrap:nowrap;gap:5mm;margin:0 0 5mm;align-items:flex-start}\n.bk-figs .bk-fig{flex:0 1 auto}\n.bk-figs img{display:block;object-fit:fill;background:#f3f1ec}\n.bk-figs figcaption{font:8.4pt/1.3 'Schibsted Grotesk',system-ui,sans-serif;color:#3d3b36;margin-top:1.2mm;overflow-wrap:anywhere}\n.bk-figs figcaption b{font-weight:600}\n.bk-src{margin:0 0 6mm;break-inside:avoid}\n.bk-src .hd{display:flex;gap:3mm;align-items:baseline;margin-bottom:1.4mm}\n.bk-src .hd .k{font:600 12pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c}\n.bk-src .hd .t{font:600 11pt 'Newsreader',Georgia,serif}\n.bk-src .who{font:9pt/1.4 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;margin:0 0 2mm}\n.bk-src .img{display:block;background:#f3f1ec;border:.3mm solid #e1ddd3;overflow:hidden;box-sizing:content-box;max-width:100%}\n.bk-src .img img{width:100%;height:100%;display:block;object-fit:contain}\n.bk-tbl{width:100%;border-collapse:collapse;font-size:10pt}\n.bk-tbl th{font:600 8pt 'Schibsted Grotesk',system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#77746c;text-align:left;padding:0 2mm 1.4mm 0;border-bottom:.3mm solid #cfcabc}\n.bk-tbl td{padding:1.1mm 2mm 1.1mm 0;border-bottom:.2mm solid #ece9e1;vertical-align:top}\n.bk-tbl td.n{width:11mm;font:600 9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;font-variant-numeric:tabular-nums}\n.bk-tbl td.s{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750}\n.bk-gen{font:600 9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;margin:3mm 0 1.6mm}\n.bk-desc{margin:0;font-size:10pt;line-height:1.38}\n.bk-desc div{padding-left:calc(var(--d,0)*5mm);text-indent:-3mm;margin-left:3mm;overflow-wrap:anywhere}\n.bk-desc small{font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-reg{columns:2;column-gap:8mm;font-size:10pt;line-height:1.35;margin:0}\n.bk-reg div{break-inside:avoid;display:flex;justify-content:space-between;gap:3mm;padding:.35mm 0;border-bottom:.2mm dotted #d9d5cb}\n.bk-reg .p{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;white-space:nowrap}\n.bk-svg{display:block;width:174mm;margin:0}\n.bk-note{font:8.8pt/1.4 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin:2mm 0 0}\n\n.bk-ages{display:flex;flex-wrap:wrap;gap:3mm;margin:3mm 0 0}\n.bk-ages figure{margin:0;width:21mm;text-align:center;break-inside:avoid}\n.bk-ages figcaption{font:500 7.5pt/1.3 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin-top:1mm}\n.bk-ages .av{border:.3mm solid #d9d5cb;box-shadow:none}\n.bk-ph.half2{margin-top:12mm}\n";
 const MMPX = 96 / 25.4;
 const BOOK_DEF = {
   title: 'Slekten', subtitle: '', cover: true, toc: true, tree: true, map: true,
   anc: false, ancRoot: '', desc: false, descRoot: '',
   persons: true, portrait: true, facts: true, family: true, life: true, notes: true, srcRefs: true, pagePerPerson: false,
-  photos: true, sources: true, srcImages: true, srcSize: 'mid', register: true, sort: 'name', selMode: 'all'
+  photos: true, sources: true, srcImages: true, srcSize: 'mid', register: true, sort: 'name', selMode: 'all', bioRoot: '', halfPage: false
 };
 const escHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const sortPersons = (arr, how) => arr.sort(how === 'birth' ? ((a, b) => (a.birthYear == null) - (b.birthYear == null) || a.birthYear - b.birthYear || nameCmp(a, b)) : nameCmp);
@@ -3969,7 +4052,7 @@ async function waitFonts(){
 async function composeBook(o, inc){
   await waitFonts();
   const persons = sortPersons([...inc].map(id => Store.persons.get(id)).filter(Boolean), o.sort);
-  const blocks = [], toc = [];
+  const blocks = [], toc = [], ranges = [];
   const B = (el, extra) => { blocks.push(Object.assign({ el }, extra || {})); return el; };
   const pref = id => inc.has(id) && o.persons ? h('span', { class: 'pref', 'data-pid': id }, ' (s. 00)') : null;
   const nameWithRef = p => [fullName(p), pref(p.id)];
@@ -4040,9 +4123,10 @@ async function composeBook(o, inc){
   if (o.persons && persons.length){
     section('sec-persons', 'Personer', plural(persons.length, 'person', 'personer'));
     persons.forEach((p, idx) => {
+      const from = blocks.length;
       const portrait = o.portrait && (Idx.photosOf.get(p.id) || []).some(x => !isSource(x.photo) && x.tag.x != null && x.photo.assetId);
       B(h('div', { class: 'bk-ph' }, portrait ? avatar(p, 62) : null,
-        h('div', { class: 't' }, h('h2', { class: 'bk-h2' }, fullName(p)), h('div', { class: 'bk-life' }, lifeSpan(p) + (ageText(p) ? ' · ' + ageText(p) : '')))), { id: 'p' + p.id, brk: o.pagePerPerson && idx > 0 ? 'before' : null, keep: true });
+        h('div', { class: 't' }, h('h2', { class: 'bk-h2' }, fullName(p)), h('div', { class: 'bk-life' }, lifeSpan(p) + (ageText(p) ? ' · ' + ageText(p) : '')))), { id: 'p' + p.id, brk: o.pagePerPerson && idx > 0 ? 'before' : null, keep: true, pstart: idx });
       if (o.facts){
         const rows = [];
         const b = [dateFull(p, 'birth'), placeName(p.birthPlace)].filter(Boolean).join(' · ');
@@ -4056,6 +4140,8 @@ async function composeBook(o, inc){
         { const dc = deathCatOf(p), ds = deathSpecOf(p); if (dc || ds) rows.push(['Dødsårsak', dc && ds ? dc + ' (' + ds + ')' : (dc || ds)]); }
         if (rows.length) B(h('dl', { class: 'bk-facts' }, rows.map(([k, v]) => [h('dt', null, k), h('dd', null, v)])));
       }
+      { const ag = AGE_SLOTS.map(([k, label]) => ({ label, sp: slotPortrait(p, k) })).filter(x => x.sp);
+        if (ag.length) B(h('div', { class: 'bk-ages' }, ag.map(x => h('figure', null, avatar(Object.assign({}, p, { portrait: x.sp.c }), 79), h('figcaption', null, x.label + (x.sp.ph.year ? ' · ' + x.sp.ph.year : '')))))); }
       if (o.family){
         const par = parentsOf(p).map(i => Store.persons.get(i)).filter(Boolean);
         const donor = p.donorId && Store.persons.get(p.donorId);
@@ -4090,6 +4176,7 @@ async function composeBook(o, inc){
         const mine = srcs.filter(s => (s.tags || []).some(t => t.pid === p.id));
         if (mine.length) B(h('div', null, h('div', { class: 'bk-sec' }, 'Kilder'), h('p', { class: 'bk-srcrefs' }, mine.map(s => h('div', null, h('span', { class: 'k' }, kNo.get(s.id)), [s.srcType || 'Kilde', s.ref, s.year].filter(Boolean).join(', '), h('span', { class: 'pref', 'data-sid': s.id }, ' (s. 00)'))))));
       }
+      ranges.push({ from, to: blocks.length, idx });
     });
   }
   // fotografier
@@ -4129,7 +4216,7 @@ async function composeBook(o, inc){
         s.caption ? h('p', { class: 'bk-p', style: { margin: '0 0 1mm' } }, s.caption) : null,
         h('p', { class: 'who' }, 'Nevner: ' + who)];
       const pgs = pagesOf(s);
-      const pageImg = pgx => { const wmax = 174 * MMPX, hmax = (o.srcSize === 'big' ? 195 : 112) * MMPX; let wpx = wmax, hpx = 120 * MMPX; if (pgx.w && pgx.h){ const k = Math.min(wmax / pgx.w, hmax / pgx.h); wpx = pgx.w * k; hpx = pgx.h * k; } return h('div', { class: 'img', style: { width: wpx + 'px', height: hpx + 'px' } }, h('img', { src: photoUrl(pgx), alt: '', 'data-asset': pgx.assetId, 'data-max': 2600 })); };
+      const pageImg = pgx => { const wmax = (o.srcSize === 'small' ? 110 : 174) * MMPX, hmax = (o.srcSize === 'big' ? 195 : o.srcSize === 'small' ? 62 : 112) * MMPX; let wpx = wmax, hpx = 120 * MMPX; if (pgx.w && pgx.h){ const k = Math.min(wmax / pgx.w, hmax / pgx.h); wpx = pgx.w * k; hpx = pgx.h * k; } return h('div', { class: 'img', style: { width: wpx + 'px', height: hpx + 'px' } }, h('img', { src: photoUrl(pgx), alt: '', 'data-asset': pgx.assetId, 'data-max': 2600 })); };
       if (pgs.length > 1) kids.splice(1, 0, h('p', { class: 'who' }, plural(pgs.length, 'side', 'sider')));
       if (o.srcImages) kids.push(pageImg(pgs[0]));
       B(h('div', { class: 'bk-src' }, kids), { id: 's' + s.id });
@@ -4156,7 +4243,22 @@ async function composeBook(o, inc){
   const pageOf = {};
   let cur = newPage();
   const over = pg => pg.body.scrollHeight > pg.body.clientHeight + 1;
-  blocks.forEach(blk => {
+  // halv side: personer hvis kapittel får plass på en halv side deler side to og to
+  const startOf = new Map();
+  if (o.pagePerPerson && o.halfPage){
+    const tp = h('article', { class: 'page' }, h('div', { class: 'pg-body' })); holder.appendChild(tp);
+    const mbody = tp.firstElementChild, HALF = 123 * MMPX;
+    ranges.forEach(r => { const w = h('div'); mbody.appendChild(w); blocks.slice(r.from, r.to).forEach(b => w.appendChild(b.el.cloneNode(true))); r.small = w.offsetHeight <= HALF; mbody.removeChild(w); startOf.set(r.from, r); });
+    tp.remove();
+  }
+  let halfOpen = false;
+  blocks.forEach((blk, bi) => {
+    let force = false;
+    if (startOf.has(bi)){
+      const r = startOf.get(bi);
+      if (r.idx > 0 && r.small && halfOpen){ halfOpen = false; blk.el.classList.add('half2'); blk.brk = null; }
+      else { halfOpen = !!r.small; }
+    }
     if (blk.brk === 'before' && cur.body.children.length) cur = newPage();
     cur.body.appendChild(blk.el);
     if (over(cur) && cur.body.children.length > 1){
@@ -4231,7 +4333,7 @@ const BookView = {
     try { const s = JSON.parse(localStorage.getItem('slekt.book') || 'null'); if (s){ Object.assign(this.o, s.o || {}); this.sel = new Set(s.sel || []); } } catch (_) {}
   },
   save(){ try { localStorage.setItem('slekt.book', JSON.stringify({ o: this.o, sel: [...this.sel] })); } catch (_) {} },
-  included(){ return this.o.selMode === 'all' ? new Set(Store.persons.keys()) : new Set([...this.sel].filter(id => Store.persons.has(id))); },
+  included(){ if (this.o.selMode === 'all') return new Set(Store.persons.keys()); if (this.o.selMode === 'bio'){ return Store.persons.has(this.o.bioRoot) ? bioRelatives(this.o.bioRoot) : new Set(); } return new Set([...this.sel].filter(id => Store.persons.has(id))); },
   mount(root){
     this.load(); this.root = root; this.result = null;
     this.ui = h('div', { class: 'bookui' });
@@ -4270,8 +4372,9 @@ const BookView = {
     this.rootSels = [];
     const ancRow = o.anc ? h('div', { class: 'bk-sub' }, h('label', { class: 'lbl' }, 'Anetavle for'), this.rootSel('ancRoot')) : null;
     const descRow = o.desc ? h('div', { class: 'bk-sub' }, h('label', { class: 'lbl' }, 'Etterkommere av'), this.rootSel('descRoot')) : null;
-    const personOpts = o.persons ? h('div', { class: 'bk-sub bk-grid' }, this.chk('portrait', 'Portrett'), this.chk('facts', 'Født og død'), this.chk('family', 'Familie'), this.chk('life', 'Livsløp og bosteder'), this.chk('notes', 'Notater'), this.chk('srcRefs', 'Kildehenvisninger'), this.chk('pagePerPerson', 'Hver person på ny side')) : null;
-    const srcOpts = o.sources ? h('div', { class: 'bk-sub' }, this.chk('srcImages', 'Ta med bildene av kildene'), o.srcImages ? h('div', { style: { marginTop: '8px' } }, h('label', { class: 'lbl' }, 'Størrelse på kildebilder'), h('select', { class: 'inp', style: { width: 'auto', maxWidth: '100%' }, 'aria-label': 'Størrelse på kildebilder', onchange: e => { o.srcSize = e.target.value; this.save(); } }, [['mid', 'Middels (to kilder per side)'], ['big', 'Stor (opptil hel side)']].map(([v, t]) => h('option', { value: v, selected: (o.srcSize || 'mid') === v }, t)))) : null) : null;
+    const personOpts = o.persons ? h('div', { class: 'bk-sub bk-grid' }, this.chk('portrait', 'Portrett'), this.chk('facts', 'Født og død'), this.chk('family', 'Familie'), this.chk('life', 'Livsløp og bosteder'), this.chk('notes', 'Notater'), this.chk('srcRefs', 'Kildehenvisninger'), this.chk('pagePerPerson', 'Hver person på ny side'), o.pagePerPerson ? this.chk('halfPage', 'Halv side ved lite informasjon', 'to personer med lite stoff deler en side') : null) : null;
+    const srcOpts = o.sources ? h('div', { class: 'bk-sub' }, this.chk('srcImages', 'Ta med bildene av kildene'), o.srcImages ? h('div', { style: { marginTop: '8px' } }, h('label', { class: 'lbl' }, 'Størrelse på kildebilder'), h('select', { class: 'inp', style: { width: 'auto', maxWidth: '100%' }, 'aria-label': 'Størrelse på kildebilder', onchange: e => { o.srcSize = e.target.value; this.save(); } }, [['small', 'Liten (tre til fire kilder per side)'], ['mid', 'Middels (to kilder per side)'], ['big', 'Stor (opptil hel side)']].map(([v, t]) => h('option', { value: v, selected: (o.srcSize || 'mid') === v }, t)))) : null) : null;
+    if (o.selMode === 'bio' && !Store.persons.has(o.bioRoot)){ const ps0 = [...Store.persons.values()].sort(nameCmp); if (ps0.length) o.bioRoot = ps0[0].id; }
     const nSel = this.included().size;
     clear(this.ui).append(
       h('section', { class: 'card' }, h('h2', null, 'Innhold'),
@@ -4283,7 +4386,9 @@ const BookView = {
       h('section', { class: 'card' }, h('h2', null, 'Personer'),
         h('div', { class: 'seg', role: 'group', 'aria-label': 'Hvilke personer' },
           h('button', { type: 'button', 'aria-pressed': String(o.selMode === 'all'), onclick: () => { o.selMode = 'all'; this.save(); this.draw(); } }, 'Alle (' + Store.persons.size + ')'),
+          h('button', { type: 'button', 'aria-pressed': String(o.selMode === 'bio'), onclick: () => { o.selMode = 'bio'; this.save(); this.draw(); } }, 'Biologisk slekt' + (o.selMode === 'bio' ? ' (' + nSel + ')' : '')),
           h('button', { type: 'button', 'aria-pressed': String(o.selMode === 'pick'), onclick: () => { o.selMode = 'pick'; if (!this.sel.size) this.sel = new Set(Store.persons.keys()); this.save(); this.draw(); } }, 'Utvalg' + (o.selMode === 'pick' ? ' (' + nSel + ')' : ''))),
+        o.selMode === 'bio' ? h('div', { class: 'bk-sub' }, h('label', { class: 'lbl' }, 'Alle biologiske slektninger av'), this.rootSel('bioRoot'), h('p', { class: 'faint', style: { fontSize: '13px', margin: '6px 0 0' } }, 'Forfedre og alle deres etterkommere: søsken, onkler, tanter, søskenbarn og så videre. Steforeldre og partnere til slektningene er ikke med.')) : null,
         o.selMode === 'pick' ? this.pickUi() : null),
       h('section', { class: 'card' }, h('h2', null, 'Tittel og rekkefølge'),
         h('div', { class: 'fgrid' },
@@ -4384,7 +4489,7 @@ const App = {
   tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', places: 'register', place: 'register', quality: 'register', timeline: 'register', compare: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
-    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '01.11 11:59')); } catch (_) {}
+    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '07.11 18:56')); } catch (_) {}
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
