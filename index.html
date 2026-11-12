@@ -632,6 +632,14 @@ button.ds-t:hover{background:var(--surface-2)}
 .tl-ph{display:block;margin-top:6px;padding:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface);cursor:pointer;max-width:100%}
 .tl-ph img{display:block;max-width:100%;max-height:120px;object-fit:cover}
 
+.tl-baby{display:block;margin-top:6px;padding:0;border:0;background:none;cursor:pointer;border-radius:50%}
+.tl-baby:focus-visible,.tl-ph:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.gp-box{display:grid;gap:6px}
+.gp-row{display:flex;gap:6px;align-items:center;min-width:0}
+.gp-row .inp{flex:1 1 auto;min-width:0}
+.bk-modes{flex-wrap:wrap;max-width:100%}
+
 /* Bokside: hvitt A4-ark med faste mål, uavhengig av tema. */
 .page{position:relative;width:210mm;height:296.6mm;background:#fff;color:#1c1b19;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:10.5pt;line-height:1.42;overflow:hidden;box-sizing:border-box;padding:16mm 18mm 0 18mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;text-align:left}
 .page *{box-sizing:border-box}
@@ -701,6 +709,15 @@ button.ds-t:hover{background:var(--surface-2)}
 .bk-ages .av{border:.3mm solid #d9d5cb;box-shadow:none}
 .bk-ph.half2{margin-top:12mm}
 
+.bk-fn{font:600 7pt/1 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;margin-left:.6mm;vertical-align:super}
+.bk-dc{font-size:10pt;line-height:1.45;display:grid;gap:1.2mm}
+.bk-dc>div{display:grid;grid-template-columns:9mm minmax(0,1fr);break-inside:avoid}
+.bk-dc .n{font:600 8.5pt/1.6 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c}
+.bk-dc .p{color:#77746c}
+
+.bk-srch{margin:8mm 0 1mm}
+.bk-paper{font-size:9pt;margin:5mm 0 2mm}
+
 </style>
 </head>
 <body>
@@ -717,9 +734,9 @@ button.ds-t:hover{background:var(--surface-2)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
-<script src="data-world.js?v=202611121312"></script>
-<script src="data-kom.js?v=202611121312"></script>
-<script src="data-gaz.js?v=202611121312"></script>
-<script src="app.js?v=202611121312"></script>
+<script src="data-world.js?v=202611121627"></script>
+<script src="data-kom.js?v=202611121627"></script>
+<script src="data-gaz.js?v=202611121627"></script>
+<script src="app.js?v=202611121627"></script>
 </body>
 </html>
