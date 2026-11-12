@@ -1784,7 +1784,7 @@ const PersonView = {
     const bd = dateOf(p, 'birth');
     const ageAt = e => { if (e.y == null || bd.y == null || e.k === 'a') return null; const a = yearsBetween(bd, { y: e.y, m: e.md ? Math.floor(e.md / 100) || null : null, d: e.md ? e.md % 100 || null : null }); return a != null && a >= 0 && a <= 120 ? a : null; };
     const lifeCard = h('section', { class: 'card' }, h('h2', null, 'Livsløp'),
-      evs.length ? h('ul', { class: 'life-list' }, evs.map(e => { const ag = ageAt(e); const agc = h('div', { class: 'ag' }, e.k === 'a' ? e.age + ' år' : ag != null ? ag + ' år' : ''); return e.k === 'a' ? h('li', { class: 'age-mark', 'aria-label': e.age + ' år' }, agc, h('div', { class: 'yr' }), h('div', { class: 'dot tick' }), h('div', null)) : h('li', null, agc, h('div', { class: 'yr' }, e.y != null ? e.y : '–'), h('div', { class: 'dot ' + (e.k === 'k' ? 'kid' : e.k === 'm' ? 'sm' : e.k === 'r' ? 'rel' : e.k === 'w' ? 'wed' : '') }), h('div', null, h('div', null, e.t), e.s ? h('div', { class: 'k' }, e.s) : null, e.photo ? h('button', { type: 'button', class: 'tl-ph', 'aria-label': 'Åpne bryllupsbildet', onclick: () => Photos.open(e.photo.id) }, h('img', { src: photoUrl(e.photo), alt: e.photo.caption || 'Bryllupsbilde', loading: 'lazy' })) : null)); }))
+      evs.length ? h('ul', { class: 'life-list ages' }, evs.map(e => { const ag = ageAt(e); const agc = h('div', { class: 'ag' }, e.k === 'a' ? e.age + ' år' : ag != null ? ag + ' år' : ''); return e.k === 'a' ? h('li', { class: 'age-mark', 'aria-label': e.age + ' år' }, agc, h('div', { class: 'yr' }), h('div', { class: 'dot tick' }), h('div', null)) : h('li', null, agc, h('div', { class: 'yr' }, e.y != null ? e.y : '–'), h('div', { class: 'dot ' + (e.k === 'k' ? 'kid' : e.k === 'm' ? 'sm' : e.k === 'r' ? 'rel' : e.k === 'w' ? 'wed' : '') }), h('div', null, h('div', null, e.t), e.s ? h('div', { class: 'k' }, e.s) : null, e.photo ? h('button', { type: 'button', class: 'tl-ph', 'aria-label': 'Åpne bryllupsbildet', onclick: () => Photos.open(e.photo.id) }, h('img', { src: photoUrl(e.photo), alt: e.photo.caption || 'Bryllupsbilde', loading: 'lazy' })) : null)); }))
         : h('p', { class: 'muted' }, 'Legg inn fødsel, bosteder og død for å se livsløpet.'));
 
     // kart
@@ -4500,7 +4500,7 @@ const App = {
   tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', places: 'register', place: 'register', quality: 'register', timeline: 'register', compare: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
-    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '12.11 11:37')); } catch (_) {}
+    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '12.11 13:12')); } catch (_) {}
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
