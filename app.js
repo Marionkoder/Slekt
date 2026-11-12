@@ -1621,6 +1621,15 @@ function lifeEvents(p, o = {}){
         add(x.p, k === 'gift' ? (x.p.sex === 'm' ? 'ektemann' : 'ektefelle') : k === 'samboer' ? 'samboer' : 'partner'); });
       (function down(id, d){ Idx.kidsOf(id).forEach(c => { if (seen.has(c.id)) return; seen.add(c.id); add(c, kinWord(0, d + 1, c.sex, 1, [])); down(c.id, d + 1); }); })(p.id, 0);
     } }
+  if (o.photos){
+    const spouses = new Set(Idx.partnersOf(p.id).filter(x => relKind(x) !== 'foreldre').map(x => x.p.id));
+    (Idx.photosOf.get(p.id) || []).forEach(({ photo: ph }) => {
+      if (isSource(ph) || ph.ptype !== 'Bryllupsbilde' || ph.year == null || ph.decade) return;
+      const sp = (ph.tags || []).map(t => t.pid).filter(id => spouses.has(id)).map(id => Store.persons.get(id)).filter(Boolean);
+      if (!sp.length) return;
+      ev.push({ y: ph.year, k: 'w', t: 'Bryllupsbilde med ' + sp.map(fullName).join(' og '), photo: ph });
+    });
+  }
   if (o.marks && p.birthYear != null){
     const end = p.deathYear != null ? p.deathYear : (isDead(p) ? Math.max(...ev.filter(e => e.y != null).map(e => e.y), p.birthYear) : NOW_YEAR);
     for (let a = 10; p.birthYear + a <= end; a += 10) ev.push({ y: p.birthYear + a, k: 'a', t: '', age: a });
@@ -1771,9 +1780,11 @@ const PersonView = {
       stepKids.length ? grp('Stebarn', stepKids.map(x => personChip(x.p, [x.p.birthYear != null ? 'f. ' + x.p.birthYear : '', 'barn av ' + (x.via.given || fullName(x.via))].filter(Boolean).join(' · '))), null) : null));
 
     // livsløp
-    const evs = lifeEvents(p, { marks: true });
+    const evs = lifeEvents(p, { marks: true, photos: true });
+    const bd = dateOf(p, 'birth');
+    const ageAt = e => { if (e.y == null || bd.y == null || e.k === 'a') return null; const a = yearsBetween(bd, { y: e.y, m: e.md ? Math.floor(e.md / 100) || null : null, d: e.md ? e.md % 100 || null : null }); return a != null && a >= 0 && a <= 120 ? a : null; };
     const lifeCard = h('section', { class: 'card' }, h('h2', null, 'Livsløp'),
-      evs.length ? h('ul', { class: 'life-list' }, evs.map(e => e.k === 'a' ? h('li', { class: 'age-mark', 'aria-label': e.age + ' år' }, h('div', { class: 'yr' }, e.age + ' år'), h('div', { class: 'dot tick' }), h('div', null)) : h('li', null, h('div', { class: 'yr' }, e.y != null ? e.y : '–'), h('div', { class: 'dot ' + (e.k === 'k' ? 'kid' : e.k === 'm' ? 'sm' : e.k === 'r' ? 'rel' : '') }), h('div', null, h('div', null, e.t), e.s ? h('div', { class: 'k' }, e.s) : null))))
+      evs.length ? h('ul', { class: 'life-list' }, evs.map(e => { const ag = ageAt(e); const agc = h('div', { class: 'ag' }, e.k === 'a' ? e.age + ' år' : ag != null ? ag + ' år' : ''); return e.k === 'a' ? h('li', { class: 'age-mark', 'aria-label': e.age + ' år' }, agc, h('div', { class: 'yr' }), h('div', { class: 'dot tick' }), h('div', null)) : h('li', null, agc, h('div', { class: 'yr' }, e.y != null ? e.y : '–'), h('div', { class: 'dot ' + (e.k === 'k' ? 'kid' : e.k === 'm' ? 'sm' : e.k === 'r' ? 'rel' : e.k === 'w' ? 'wed' : '') }), h('div', null, h('div', null, e.t), e.s ? h('div', { class: 'k' }, e.s) : null, e.photo ? h('button', { type: 'button', class: 'tl-ph', 'aria-label': 'Åpne bryllupsbildet', onclick: () => Photos.open(e.photo.id) }, h('img', { src: photoUrl(e.photo), alt: e.photo.caption || 'Bryllupsbilde', loading: 'lazy' })) : null)); }))
         : h('p', { class: 'muted' }, 'Legg inn fødsel, bosteder og død for å se livsløpet.'));
 
     // kart
@@ -4489,7 +4500,7 @@ const App = {
   tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', places: 'register', place: 'register', quality: 'register', timeline: 'register', compare: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
-    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '07.11 18:56')); } catch (_) {}
+    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '12.11 11:37')); } catch (_) {}
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
