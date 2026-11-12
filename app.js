@@ -348,7 +348,10 @@ const Idx = {
 };
 
 const DEFAULT_EVENTS = [{ id: 'penicillin', title: 'Penicillin blir tatt i allmenn bruk i Norge', year: 1946, month: 12, day: null, on: true }];
-const DEFAULT_PHOTO_TYPES = ['Portrett', 'Klassebilde', 'Bryllupsbilde', 'Familiebilde', 'Hverdagsbilde'];
+/* Faddere: [{ id }] for personer i slekten eller [{ name }] for andre */
+const godparentName = g => g && g.id && Store.persons.has(g.id) ? fullName(Store.persons.get(g.id)) : (g && g.name) || '';
+const godparentsOf = p => (p.godparents || []).filter(g => godparentName(g));
+const DEFAULT_PHOTO_TYPES = ['Portrett', 'Dåpsbilde', 'Klassebilde', 'Bryllupsbilde', 'Familiebilde', 'Hverdagsbilde'];
 const Store = {
   persons: new Map(), photos: new Map(), events: null, photoTypes: null, db: null, assets: null, canWrite: true, mode: 'loading',
   listeners: new Set(), _raf: 0,
@@ -412,9 +415,14 @@ const Store = {
     try { await this.db.collection(coll).doc(id).delete(); } catch (e){ console.error(e); toast('Kunne ikke slette.'); }
   },
   /* Fototyper (egen liste som kan utvides) */
-  photoTypeList(){ return this.photoTypes || DEFAULT_PHOTO_TYPES; },
+  photoTypeList(){
+    if (!this.photoTypes) return DEFAULT_PHOTO_TYPES;
+    let seen = false; try { seen = localStorage.getItem('slekt.ptDaap') === '1'; } catch (e){}
+    return !seen && !this.photoTypes.includes('Dåpsbilde') ? this.photoTypes.concat(['Dåpsbilde']) : this.photoTypes;
+  },
   async savePhotoTypes(list){
-    this.photoTypes = list.slice(); this.emit();
+    this.photoTypes = list.slice(); try { localStorage.setItem('slekt.ptDaap', '1'); } catch (e){}
+    this.emit();
     if (LOCAL_MODE){ try { await LocalDB.put('meta', 'photoTypes', { list: this.photoTypes }); noteChange(); } catch (e){ console.error(e); toast('Kunne ikke lagre typene.'); } return; }
     if (!this.db) return;
     try { await this.db.collection('meta').doc('photoTypes').set({ list: this.photoTypes }); } catch (e){ console.error(e); toast('Kunne ikke lagre typene.'); }
@@ -1285,13 +1293,31 @@ function openPersonForm(opts = {}){
 
   const given = h('input', { class: 'inp', value: f.given || '', autocomplete: 'off', autofocus: true, oninput: e => f.given = e.target.value });
   const family = h('input', { class: 'inp', value: f.family || '', autocomplete: 'off', oninput: e => f.family = e.target.value });
+  // faddere: inntil seks, enten en person i slekten (velges fra forslagene) eller et navn i fritekst
+  const gpLabel = q => fullName(q) + (q.birthYear != null ? ' (f. ' + q.birthYear + ')' : '');
+  const gpMap = new Map(); [...Store.persons.values()].filter(q => q.id !== f.id).sort(nameCmp).forEach(q => { const l = gpLabel(q); if (!gpMap.has(l)) gpMap.set(l, q.id); });
+  const gpDl = h('datalist', { id: 'gp-dl' }, [...gpMap.keys()].map(l => h('option', { value: l })));
+  let gps = (f.godparents || []).map(g => g.id && Store.persons.has(g.id) ? gpLabel(Store.persons.get(g.id)) : (g.name || '')).filter(Boolean).slice(0, 6);
+  const gpBox = h('div', { class: 'gp-box' });
+  const gpSync = () => { f.godparents = gps.map(t => t.trim()).filter(Boolean).map(t => gpMap.has(t) ? { id: gpMap.get(t) } : { name: t }); };
+  const gpDraw = () => {
+    clear(gpBox); gpBox.appendChild(gpDl);
+    const rows = gps.length ? gps : [''];
+    rows.forEach((t, i) => gpBox.appendChild(h('div', { class: 'gp-row' },
+      h('input', { class: 'inp', value: t, list: 'gp-dl', autocomplete: 'off', placeholder: 'Navn, eller velg en person i slekten', 'aria-label': 'Fadder ' + (i + 1), oninput: e => { gps[i] = e.target.value; gpSync(); } }),
+      rows.length > 1 || t ? h('button', { type: 'button', class: 'btn sm ghost', 'aria-label': 'Fjern fadder ' + (i + 1), onclick: () => { gps.splice(i, 1); gpSync(); gpDraw(); } }, ico('trash', 16)) : null)));
+    if (!gps.length) gps = [''];
+    if (gps.length < 6) gpBox.appendChild(h('button', { type: 'button', class: 'btn sm', onclick: () => { gps.push(''); gpDraw(); const ins = gpBox.querySelectorAll('input'); ins[ins.length - 1].focus(); } }, ico('plus', 14), 'Legg til fadder'));
+    else gpBox.appendChild(h('p', { class: 'faint', style: { fontSize: '13px', margin: '4px 0 0' } }, 'Inntil seks faddere.'));
+  };
+  gpDraw();
   const middle = h('input', { class: 'inp', value: f.middle || '', autocomplete: 'off', oninput: e => f.middle = e.target.value });
   const patInp = h('input', { class: 'inp', value: f.patronym || '', autocomplete: 'off', placeholder: 'f.eks. Olsen eller Olsdatter', oninput: e => f.patronym = e.target.value });
   const birthName = h('input', { class: 'inp', value: f.birthName || '', autocomplete: 'off', placeholder: 'Hvis annet enn etternavnet, f.eks. pikenavn', oninput: e => f.birthName = e.target.value });
   const sexBtns = {};
   const sexSeg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Kjønn' }, [['m', 'Mann'], ['f', 'Kvinne'], ['u', 'Ukjent']].map(([k, t]) => sexBtns[k] = h('button', { type: 'button', 'aria-pressed': String(f.sex === k), onclick: () => { f.sex = k; Object.entries(sexBtns).forEach(([kk, b]) => b.setAttribute('aria-pressed', String(kk === k))); } }, t)));
   const yearInp = (key, ph) => h('input', { class: 'inp', type: 'number', inputmode: 'numeric', min: 0, max: 2100, placeholder: ph || 'År', value: f[key] != null ? f[key] : '', oninput: e => f[key] = intOrNull(e.target.value) });
-  ['birth', 'death'].forEach(w => { const x = dateOf(f, w); f[w + 'Month'] = x.m; f[w + 'Day'] = x.d; f[w + 'Date'] = x.extra; });
+  ['birth', 'death', 'bapt'].forEach(w => { const x = dateOf(f, w); f[w + 'Month'] = x.m; f[w + 'Day'] = x.d; f[w + 'Date'] = x.extra; });
   const monthSel = key => h('select', { class: 'inp', 'aria-label': 'Måned', onchange: e => { f[key] = e.target.value ? +e.target.value : null; } }, h('option', { value: '' }, 'Ukjent'), ...MONTHS.map((t, i) => h('option', { value: i + 1, selected: f[key] === i + 1 }, t)));
   const dayInp = key => h('input', { class: 'inp', type: 'text', inputmode: 'numeric', maxlength: 2, placeholder: 'Ukjent', 'aria-label': 'Dag', value: f[key] != null ? f[key] : '', oninput: e => { const n = parseInt(e.target.value.replace(/\D/g, ''), 10); f[key] = n >= 1 && n <= 31 ? n : null; } });
   const textInp = (key, ph) => h('input', { class: 'inp', type: 'text', placeholder: ph, value: f[key] || '', oninput: e => f[key] = e.target.value });
@@ -1389,7 +1415,9 @@ function openPersonForm(opts = {}){
     else { if (o.adoptYear == null) delete o.adoptYear; if (!o.bioFatherId || o.bioFatherId === o.id) delete o.bioFatherId; if (!o.bioMotherId || o.bioMotherId === o.id) delete o.bioMotherId; }
     if (!o.coParentId) delete o.coParentId; if (!o.donorId) delete o.donorId;
     if (!o.deceased || o.deathYear != null) delete o.deceased;
-    ['birth', 'death'].forEach(w => { ['Month', 'Day', 'Date'].forEach(s => { if (!o[w + s]) delete o[w + s]; }); if (o[w + 'Day'] && !o[w + 'Month']) delete o[w + 'Day']; if (o[w + 'Day'] && o[w + 'Month'] && o[w + 'Day'] > [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][o[w + 'Month'] - 1]) o[w + 'Day'] = null; if (!o[w + 'Day']) delete o[w + 'Day']; });
+    o.godparents = (o.godparents || []).filter(g => g && (g.id || (g.name || '').trim())).slice(0, 6); if (!o.godparents.length) delete o.godparents;
+    if (o.baptYear == null) delete o.baptYear; if (o.baptPlace && !o.baptPlace.name) delete o.baptPlace;
+    ['birth', 'death', 'bapt'].forEach(w => { ['Month', 'Day', 'Date'].forEach(s => { if (!o[w + s]) delete o[w + s]; }); if (o[w + 'Day'] && !o[w + 'Month']) delete o[w + 'Day']; if (o[w + 'Day'] && o[w + 'Month'] && o[w + 'Day'] > [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][o[w + 'Month'] - 1]) o[w + 'Day'] = null; if (!o[w + 'Day']) delete o[w + 'Day']; });
     if (!o.burialPlace || (!o.burialPlace.name && o.burialPlace.lat == null)) delete o.burialPlace; o.burialNote = (o.burialNote || '').trim(); if (!o.burialNote || !o.burialPlace) delete o.burialNote;
     o.deathCause = (o.deathCause || '').trim(); if (!o.deathCat) delete o.deathCat; if (!(o.deceased || o.deathYear != null || (o.deathDate || '').trim() || o.deathPlace)) delete o.deathCat; if (!o.deathCause || !(o.deceased || o.deathYear != null || (o.deathDate || '').trim() || o.deathPlace)) delete o.deathCause;
     if (!o.noKids) delete o.noKids; if (!o.noSiblings) delete o.noSiblings; if (!o.noPartners) delete o.noPartners;
@@ -1409,6 +1437,10 @@ function openPersonForm(opts = {}){
     h('div', { class: 'fs' }, h('h3', null, 'Født'),
       h('div', { class: 'fgrid' }, fld('År', yearInp('birthYear', 'f.eks. 1872'), 'half-m'), fld('Måned', monthSel('birthMonth'), 'half-m'), fld('Dag', dayInp('birthDay'), 'half-m'), fld('Andre detaljer (valgfritt)', textInp('birthDate', 'f.eks. «om natten», «før 1873»'), 'full'),
         fld('Fødested', placeField(f.birthPlace, pl => f.birthPlace = pl, { label: 'Fødested' }), 'full'))),
+    h('div', { class: 'fs' }, h('h3', null, 'Døpt (valgfritt)'),
+      h('div', { class: 'fgrid' }, fld('År', yearInp('baptYear', 'f.eks. 1872'), 'half-m'), fld('Måned', monthSel('baptMonth'), 'half-m'), fld('Dag', dayInp('baptDay'), 'half-m'),
+        fld('Dåpssted', placeField(f.baptPlace, pl => f.baptPlace = pl, { label: 'Dåpssted', placeholder: 'Kirke eller kommune, f.eks. Voss kirke' }), 'full'))),
+    h('div', { class: 'fs' }, h('h3', null, 'Faddere ved dåpen (valgfritt)'), gpBox),
     h('div', { class: 'fs' }, h('h3', null, 'Utvandret'),
       h('div', { class: 'fgrid' }, fld('Utvandret til', placeField(f.emigratedTo, pl => f.emigratedTo = pl, { label: 'Utvandret til', placeholder: 'Land, sted eller kommune, f.eks. Minnesota, USA' }), 'full'), fld('År (valgfritt)', yearInp('emigratedYear', 'f.eks. 1882'), 'half-m'))),
     h('div', { class: 'fs' }, h('h3', null, 'Død'),
@@ -1600,13 +1632,16 @@ function lifeEvents(p, o = {}){
   const ev = [];
   const pn = pl => pl && pl.name ? noPlace(pl.name) : null;
   if (p.birthYear != null || p.birthPlace) ev.push({ y: p.birthYear, k: 'b', t: 'Født' + (pn(p.birthPlace) ? ' ' + iPaa(p.birthPlace) + ' ' + pn(p.birthPlace) : ''), s: dsub(p, 'birth'), md: mdOf(p, 'birth') });
+  { const bph = o.photos ? (Idx.photosOf.get(p.id) || []).map(x => x.photo).find(ph => !isSource(ph) && ph.ptype === 'Dåpsbilde') : null;
+    if (p.baptYear != null) ev.push({ y: p.baptYear, k: 'u', t: 'Døpt' + (pn(p.baptPlace) ? ' ' + iPaa(p.baptPlace) + ' ' + pn(p.baptPlace) : ''), s: [dsub(p, 'bapt'), godparentsOf(p).length ? 'Faddere: ' + godparentsOf(p).map(godparentName).join(', ') : ''].filter(Boolean).join(' · '), md: mdOf(p, 'bapt') || (p.baptYear === p.birthYear ? mdOf(p, 'birth') + 0.5 : 0), photo: bph || null });
+    else if (bph && (bph.year != null && !bph.decade || p.birthYear != null)) ev.push({ y: bph.year != null && !bph.decade ? bph.year : p.birthYear, k: 'u', t: 'Dåpsbilde', md: mdOf(p, 'birth') + 0.5, photo: bph }); }
   (p.moves || []).forEach(m => ev.push({ y: m.year, k: 'm', t: 'Bosatt ' + iPaa(m.place) + ' ' + (pn(m.place) || 'ukjent sted'), s: m.place && m.place.lat == null ? 'ikke på kartet' : '' }));
   Idx.partnersOf(p.id).forEach(x => {
     const k = relKind(x); if (k === 'foreldre') return;
     if (x.year != null) ev.push({ y: x.year, k: 'u', t: (k === 'gift' ? 'Giftet seg med ' : k === 'samboer' ? 'Ble samboer med ' : 'Ble partner med ') + fullName(x.p) });
     if (x.endYear != null) ev.push({ y: x.endYear, k: 'u', t: (k === 'gift' ? 'Ble skilt fra ' : k === 'samboer' ? 'Samboerskapet med ' + fullName(x.p) + ' tok slutt' : 'Forholdet til ' + fullName(x.p) + ' tok slutt') + (k === 'gift' ? fullName(x.p) : '') });
   });
-  Idx.kidsOf(p.id).forEach(c => { if (c.birthYear != null) ev.push({ y: c.birthYear, k: 'k', t: 'Barn født: ' + fullName(c), s: dsub(c, 'birth'), md: mdOf(c, 'birth') }); });
+  Idx.kidsOf(p.id).forEach(c => { if (c.birthYear != null) ev.push({ y: c.birthYear, k: 'k', t: 'Barn født: ' + fullName(c), s: dsub(c, 'birth'), md: mdOf(c, 'birth'), baby: o.photos && slotPortrait(c, '0-1') ? c : null }); });
   if (p.emigratedTo) ev.push({ y: p.emigratedYear == null ? null : p.emigratedYear, k: 'u', t: 'Utvandret til ' + pn(p.emigratedTo) });
   if (p.deathYear != null || p.deathPlace || isDead(p)) ev.push({ y: p.deathYear, k: 'd', t: (p.deathYear == null && !p.deathPlace && !(p.deathDate || '').trim() ? 'Død, tidspunkt ukjent' : 'Døde') + (pn(p.deathPlace) ? ' ' + iPaa(p.deathPlace) + ' ' + pn(p.deathPlace) : ''), s: dsub(p, 'death'), md: mdOf(p, 'death') });
   if (p.burialPlace && p.burialPlace.name && (p.deathYear != null || isDead(p))) ev.push({ y: p.deathYear, k: 'd', t: 'Gravlagt ' + iPaa(p.burialPlace) + ' ' + pn(p.burialPlace) + (p.burialNote ? ' (' + p.burialNote + ')' : ''), md: mdOf(p, 'death') + 0.5 });
@@ -1699,6 +1734,8 @@ const PersonView = {
     const jn = parts => parts.filter(x => x != null && x !== '').reduce((a, x, i) => a.concat(i ? [' · ', x] : [x]), []);
     const plk = pl => pl ? (placeLinkEl(pl, pn(pl))) : null;
     row('Født', jn([dateFull(p, 'birth'), plk(p.birthPlace)]));
+    row('Døpt', jn([dateFull(p, 'bapt'), plk(p.baptPlace)]));
+    { const gp = godparentsOf(p); if (gp.length) row('Faddere', gp.reduce((a, g, i) => a.concat(i ? [', '] : [], [g.id && Store.persons.has(g.id) ? h('a', { href: '#person-' + g.id, onclick: e => { e.preventDefault(); App.go('person', g.id); } }, godparentName(g)) : godparentName(g)]), [])); }
     row('Utvandret til', p.emigratedTo ? jn([p.emigratedYear != null ? String(p.emigratedYear) : null, plk(p.emigratedTo)]) : '');
     { const dj = jn([dateFull(p, 'death'), plk(p.deathPlace)]); row('Død', dj.length ? dj : (isDead(p) ? 'Ja, tidspunkt ukjent' : '')); }
     row('Gravsted', p.burialPlace ? jn([plk(p.burialPlace), p.burialNote]) : '');
@@ -1784,7 +1821,7 @@ const PersonView = {
     const bd = dateOf(p, 'birth');
     const ageAt = e => { if (e.y == null || bd.y == null || e.k === 'a') return null; const a = yearsBetween(bd, { y: e.y, m: e.md ? Math.floor(e.md / 100) || null : null, d: e.md ? e.md % 100 || null : null }); return a != null && a >= 0 && a <= 120 ? a : null; };
     const lifeCard = h('section', { class: 'card' }, h('h2', null, 'Livsløp'),
-      evs.length ? h('ul', { class: 'life-list ages' }, evs.map(e => { const ag = ageAt(e); const agc = h('div', { class: 'ag' }, e.k === 'a' ? e.age + ' år' : ag != null ? ag + ' år' : ''); return e.k === 'a' ? h('li', { class: 'age-mark', 'aria-label': e.age + ' år' }, agc, h('div', { class: 'yr' }), h('div', { class: 'dot tick' }), h('div', null)) : h('li', null, agc, h('div', { class: 'yr' }, e.y != null ? e.y : '–'), h('div', { class: 'dot ' + (e.k === 'k' ? 'kid' : e.k === 'm' ? 'sm' : e.k === 'r' ? 'rel' : e.k === 'w' ? 'wed' : '') }), h('div', null, h('div', null, e.t), e.s ? h('div', { class: 'k' }, e.s) : null, e.photo ? h('button', { type: 'button', class: 'tl-ph', 'aria-label': 'Åpne bryllupsbildet', onclick: () => Photos.open(e.photo.id) }, h('img', { src: photoUrl(e.photo), alt: e.photo.caption || 'Bryllupsbilde', loading: 'lazy' })) : null)); }))
+      evs.length ? h('ul', { class: 'life-list ages' }, evs.map(e => { const ag = ageAt(e); const agc = h('div', { class: 'ag' }, e.k === 'a' ? e.age + ' år' : ag != null ? ag + ' år' : ''); return e.k === 'a' ? h('li', { class: 'age-mark', 'aria-label': e.age + ' år' }, agc, h('div', { class: 'yr' }), h('div', { class: 'dot tick' }), h('div', null)) : h('li', null, agc, h('div', { class: 'yr' }, e.y != null ? e.y : '–'), h('div', { class: 'dot ' + (e.k === 'k' ? 'kid' : e.k === 'm' ? 'sm' : e.k === 'r' ? 'rel' : e.k === 'w' ? 'wed' : '') }), h('div', null, h('div', null, e.t), e.s ? h('div', { class: 'k' }, e.s) : null, e.photo ? h('button', { type: 'button', class: 'tl-ph', 'aria-label': 'Åpne bildet', onclick: () => Photos.open(e.photo.id) }, h('img', { src: photoUrl(e.photo), alt: e.photo.caption || e.t, loading: 'lazy' })) : null, e.baby ? (() => { const sp = slotPortrait(e.baby, '0-1'); return h('button', { type: 'button', class: 'tl-baby', 'aria-label': 'Åpne bildet av ' + fullName(e.baby), onclick: () => Photos.open(sp.ph.id) }, avatar(Object.assign({}, e.baby, { portrait: sp.c }), 64)); })() : null)); }))
         : h('p', { class: 'muted' }, 'Legg inn fødsel, bosteder og død for å se livsløpet.'));
 
     // kart
@@ -1833,7 +1870,7 @@ const PersonView = {
       cg.map(g => h('details', { class: 'cousins' }, h('summary', null, g.label, h('span', { class: 'faint' }, ' · ' + g.list.length)),
         h('div', { class: 'chips', style: { marginTop: '8px' } }, g.list.map(x => personChip(x.p, [x.p.birthYear != null ? 'f. ' + x.p.birthYear : '', 'via ' + [...x.via].map(i => { const a = Store.persons.get(i); return a ? (a.given || fullName(a)) : ''; }).filter(Boolean).join(' og ')].filter(Boolean).join(' · ')))))),
       h('p', { class: 'fnote' }, 'Biologisk slekt i samme generasjon som ' + (p.given || fullName(p)) + '. Nærmere slekt er ikke gjentatt.')) : null;
-    const fanCard = parentsOf(p).some(i => Store.persons.has(i)) ? h('section', { class: 'card fan-card' }, h('h2', null, 'Anetavle', h('button', { class: 'btn sm ghost', onclick: () => App.go('ancestors', p.id) }, 'Se hele anetavlen')), fanChart(p, 3)) : null;
+    const fanCard = parentsOf(p).some(i => Store.persons.has(i)) ? h('section', { class: 'card fan-card' }, h('h2', null, 'Anetavle', h('button', { class: 'btn sm ghost', onclick: () => App.go('ancestors', p.id) }, 'Se hele anetavlen')), fanChart(p, 3, { full: true })) : null;
     const ageList = AGE_SLOTS.map(([k, label]) => ({ k, label, sp: slotPortrait(p, k) })).filter(x => x.sp);
     const ageCard = ageList.length ? h('section', { class: 'card' }, h('h2', null, 'Gjennom livet'), h('div', { class: 'age-strip' }, ageList.map(x => h('button', { type: 'button', class: 'age-it', 'aria-label': x.label, onclick: () => Photos.open(x.sp.ph.id, { list: ageList.map(y => y.sp.ph.id) }) }, avatar(Object.assign({}, p, { portrait: x.sp.c }), 72), h('span', { class: 'age-t' }, x.label))))) : null;
     root.append(back, hero, h('div', { class: 'cols' },
@@ -2728,7 +2765,10 @@ const Photos = {
     const stage = h('div', { class: 'pvstage' }), side = h('div', { class: 'pvside' });
     const caption = h('input', { class: 'inp', type: 'text', placeholder: 'Bildetekst, f.eks. «Familien samlet på Haugen»', 'aria-label': 'Bildetekst', onchange: e => save({ caption: e.target.value }) });
     const refInp = h('input', { class: 'inp', type: 'text', placeholder: 'f.eks. Voss prestearkiv, klokkerbok 1866, s. 42', 'aria-label': 'Kildehenvisning', onchange: e => save({ ref: e.target.value }) });
-    const typeSel = h('select', { class: 'inp', 'aria-label': 'Type kilde', onchange: e => save({ srcType: e.target.value }) }, SOURCE_TYPES.map(t => h('option', { value: t }, t)));
+    const typeSel = h('select', { class: 'inp', 'aria-label': 'Type kilde', onchange: e => save({ srcType: e.target.value }).then(() => drawSide()) }, SOURCE_TYPES.map(t => h('option', { value: t }, t)));
+    const mkPaper = p => { const used = [...new Set([...Store.photos.values()].map(x => (x.paper || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'nb'));
+      return h('div', null, h('input', { class: 'inp', type: 'text', list: 'paper-dl', autocomplete: 'off', value: p.paper || '', placeholder: 'f.eks. Hordaland Folkeblad', 'aria-label': 'Avis', onchange: e => save({ paper: e.target.value.trim() || undefined }) }),
+        h('datalist', { id: 'paper-dl' }, used.map(u => h('option', { value: u })))); };
     const mkPType = p => { const cur = p.ptype || '', list = Store.photoTypeList().slice(); if (cur && !list.includes(cur)) list.push(cur);
       return h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, h('select', { class: 'inp', 'aria-label': 'Type bilde', style: { flex: '1 1 auto', minWidth: 0 }, onchange: e => save({ ptype: e.target.value || undefined }) },
         h('option', { value: '' }, 'Ingen type'), list.map(t => h('option', { value: t, selected: t === cur }, t))),
@@ -2837,6 +2877,7 @@ const Photos = {
       side.appendChild(h('div', null, h('label', { class: 'lbl' }, srcMode ? 'Personer nevnt i kilden' : 'Personer i bildet'), (p.tags || []).length ? h('div', { class: 'tagchips' }, chips) : h('p', { class: 'muted', style: { fontSize: '14px' } }, srcMode ? 'Ingen er knyttet til kilden ennå.' : 'Ingen er tagget ennå.')));
       if (edit){
         if (srcMode) side.appendChild(h('div', { class: 'fgrid' }, h('div', { class: 'half-m' }, h('label', { class: 'lbl' }, 'Type kilde'), typeSel), h('div', { class: 'half-m' }, h('label', { class: 'lbl' }, 'Årstall for dokumentet'), year),
+          p.srcType === 'Avisutklipp' || p.srcType === 'Dødsannonse' ? h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Avis'), mkPaper(p)) : null,
           h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Henvisning'), refInp), h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Notat om kilden'), caption)));
         else side.appendChild(h('div', { class: 'fgrid' }, h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Bildetekst'), caption), h('div', null, h('label', { class: 'lbl' }, 'Årstall'), year), h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Type'), mkPType(p)), h('div', { class: 'full' }, h('label', { class: 'lbl' }, 'Sted (valgfritt)'), photoPlace(p))));
         let armed = false;
@@ -3960,13 +4001,13 @@ const CompareView = {
 };
 
 /* ====== Bok til utskrift (A4) ====== */
-const BOOK_CSS = "/* Bokside: hvitt A4-ark med faste m\u00e5l, uavhengig av tema. */\n.page{position:relative;width:210mm;height:296.6mm;background:#fff;color:#1c1b19;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:10.5pt;line-height:1.42;overflow:hidden;box-sizing:border-box;padding:16mm 18mm 0 18mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;text-align:left}\n.page *{box-sizing:border-box}\n.pg-body{width:174mm;height:259mm;overflow:hidden;position:relative}\n.pg-foot{position:absolute;left:18mm;right:18mm;bottom:9mm;display:flex;justify-content:space-between;gap:10mm;font:8.5pt/1.2 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;border-top:.3mm solid #d9d5cb;padding-top:2mm}\n.pg-foot span:last-child{font-variant-numeric:tabular-nums}\n.bk-cover{height:259mm;display:flex;flex-direction:column;justify-content:center;gap:8mm;padding-bottom:20mm}\n.bk-cover .rule{width:34mm;height:1.4mm;background:#8a5a3c}\n.bk-cover h1{font:600 44pt/1.02 'Newsreader',Georgia,serif;letter-spacing:-.02em;margin:0;overflow-wrap:anywhere}\n.bk-cover .sub{font:italic 400 17pt/1.3 'Newsreader',Georgia,serif;color:#4c4a45;margin:0}\n.bk-cover .meta{font:9.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin:0}\n.bk-h1{font:600 24pt/1.1 'Newsreader',Georgia,serif;letter-spacing:-.015em;margin:0 0 5mm;padding-bottom:3mm;border-bottom:.5mm solid #8a5a3c}\n.bk-h2{font:600 19pt/1.12 'Newsreader',Georgia,serif;letter-spacing:-.01em;margin:0}\n.bk-sec{font:600 7.5pt/1.2 'Schibsted Grotesk',system-ui,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:#8a5a3c;margin:5mm 0 1.6mm}\n.bk-ph{display:flex;gap:5mm;align-items:center;padding-top:2mm;margin-top:2mm;border-top:.3mm solid #d9d5cb}\n.bk-ph.first{border-top:0;margin-top:0;padding-top:0}\n.bk-ph .av{border:.3mm solid #d9d5cb;background:#efece4;color:#5a5750;box-shadow:none}\n.bk-ph .t{min-width:0}\n.bk-life{font:9.5pt/1.3 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;margin-top:1mm;font-variant-numeric:tabular-nums}\n.bk-facts{display:grid;grid-template-columns:24mm 1fr;gap:1mm 4mm;margin:2mm 0 0}\n.bk-facts dt{font:600 8.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-facts dd{margin:0;overflow-wrap:anywhere}\n.bk-fam{display:grid;grid-template-columns:24mm 1fr;gap:1mm 4mm;margin:1mm 0 0}\n.bk-fam b{font:600 8.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-fam div{overflow-wrap:anywhere}\n.pref{display:inline-block;margin-left:.3em;min-width:3.6em;font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;white-space:nowrap}\n.bk-ev{display:grid;grid-template-columns:13mm 1fr;gap:.6mm 3mm;margin:0}\n.bk-ev .y{font:600 9pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;text-align:right;font-variant-numeric:tabular-nums}\n.bk-ev .s{font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-p{margin:0 0 2.4mm;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left}\n.bk-srcrefs{font:9pt/1.45 'Schibsted Grotesk',system-ui,sans-serif;color:#3d3b36;margin:0}\n.bk-srcrefs span.k{display:inline-block;min-width:6mm;font-weight:600;color:#8a5a3c}\n.bk-toc{display:grid;grid-template-columns:1fr auto;gap:2.4mm 6mm;margin-top:4mm;font-size:12pt}\n.bk-toc .n{font:600 10pt 'Schibsted Grotesk',system-ui,sans-serif;font-variant-numeric:tabular-nums;text-align:right;color:#5a5750}\n.bk-toc .d{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;display:block;margin-top:.4mm}\n.bk-fig{margin:0;min-width:0}\n.bk-figs{display:flex;flex-wrap:nowrap;gap:5mm;margin:0 0 5mm;align-items:flex-start}\n.bk-figs .bk-fig{flex:0 1 auto}\n.bk-figs img{display:block;object-fit:fill;background:#f3f1ec}\n.bk-figs figcaption{font:8.4pt/1.3 'Schibsted Grotesk',system-ui,sans-serif;color:#3d3b36;margin-top:1.2mm;overflow-wrap:anywhere}\n.bk-figs figcaption b{font-weight:600}\n.bk-src{margin:0 0 6mm;break-inside:avoid}\n.bk-src .hd{display:flex;gap:3mm;align-items:baseline;margin-bottom:1.4mm}\n.bk-src .hd .k{font:600 12pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c}\n.bk-src .hd .t{font:600 11pt 'Newsreader',Georgia,serif}\n.bk-src .who{font:9pt/1.4 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;margin:0 0 2mm}\n.bk-src .img{display:block;background:#f3f1ec;border:.3mm solid #e1ddd3;overflow:hidden;box-sizing:content-box;max-width:100%}\n.bk-src .img img{width:100%;height:100%;display:block;object-fit:contain}\n.bk-tbl{width:100%;border-collapse:collapse;font-size:10pt}\n.bk-tbl th{font:600 8pt 'Schibsted Grotesk',system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#77746c;text-align:left;padding:0 2mm 1.4mm 0;border-bottom:.3mm solid #cfcabc}\n.bk-tbl td{padding:1.1mm 2mm 1.1mm 0;border-bottom:.2mm solid #ece9e1;vertical-align:top}\n.bk-tbl td.n{width:11mm;font:600 9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;font-variant-numeric:tabular-nums}\n.bk-tbl td.s{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750}\n.bk-gen{font:600 9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;margin:3mm 0 1.6mm}\n.bk-desc{margin:0;font-size:10pt;line-height:1.38}\n.bk-desc div{padding-left:calc(var(--d,0)*5mm);text-indent:-3mm;margin-left:3mm;overflow-wrap:anywhere}\n.bk-desc small{font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-reg{columns:2;column-gap:8mm;font-size:10pt;line-height:1.35;margin:0}\n.bk-reg div{break-inside:avoid;display:flex;justify-content:space-between;gap:3mm;padding:.35mm 0;border-bottom:.2mm dotted #d9d5cb}\n.bk-reg .p{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;white-space:nowrap}\n.bk-svg{display:block;width:174mm;margin:0}\n.bk-note{font:8.8pt/1.4 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin:2mm 0 0}\n\n.bk-ages{display:flex;flex-wrap:wrap;gap:3mm;margin:3mm 0 0}\n.bk-ages figure{margin:0;width:21mm;text-align:center;break-inside:avoid}\n.bk-ages figcaption{font:500 7.5pt/1.3 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin-top:1mm}\n.bk-ages .av{border:.3mm solid #d9d5cb;box-shadow:none}\n.bk-ph.half2{margin-top:12mm}\n";
+const BOOK_CSS = "/* Bokside: hvitt A4-ark med faste m\u00e5l, uavhengig av tema. */\n.page{position:relative;width:210mm;height:296.6mm;background:#fff;color:#1c1b19;font-family:'Newsreader',Georgia,'Times New Roman',serif;font-size:10.5pt;line-height:1.42;overflow:hidden;box-sizing:border-box;padding:16mm 18mm 0 18mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;text-align:left}\n.page *{box-sizing:border-box}\n.pg-body{width:174mm;height:259mm;overflow:hidden;position:relative}\n.pg-foot{position:absolute;left:18mm;right:18mm;bottom:9mm;display:flex;justify-content:space-between;gap:10mm;font:8.5pt/1.2 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;border-top:.3mm solid #d9d5cb;padding-top:2mm}\n.pg-foot span:last-child{font-variant-numeric:tabular-nums}\n.bk-cover{height:259mm;display:flex;flex-direction:column;justify-content:center;gap:8mm;padding-bottom:20mm}\n.bk-cover .rule{width:34mm;height:1.4mm;background:#8a5a3c}\n.bk-cover h1{font:600 44pt/1.02 'Newsreader',Georgia,serif;letter-spacing:-.02em;margin:0;overflow-wrap:anywhere}\n.bk-cover .sub{font:italic 400 17pt/1.3 'Newsreader',Georgia,serif;color:#4c4a45;margin:0}\n.bk-cover .meta{font:9.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin:0}\n.bk-h1{font:600 24pt/1.1 'Newsreader',Georgia,serif;letter-spacing:-.015em;margin:0 0 5mm;padding-bottom:3mm;border-bottom:.5mm solid #8a5a3c}\n.bk-h2{font:600 19pt/1.12 'Newsreader',Georgia,serif;letter-spacing:-.01em;margin:0}\n.bk-sec{font:600 7.5pt/1.2 'Schibsted Grotesk',system-ui,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:#8a5a3c;margin:5mm 0 1.6mm}\n.bk-ph{display:flex;gap:5mm;align-items:center;padding-top:2mm;margin-top:2mm;border-top:.3mm solid #d9d5cb}\n.bk-ph.first{border-top:0;margin-top:0;padding-top:0}\n.bk-ph .av{border:.3mm solid #d9d5cb;background:#efece4;color:#5a5750;box-shadow:none}\n.bk-ph .t{min-width:0}\n.bk-life{font:9.5pt/1.3 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;margin-top:1mm;font-variant-numeric:tabular-nums}\n.bk-facts{display:grid;grid-template-columns:24mm 1fr;gap:1mm 4mm;margin:2mm 0 0}\n.bk-facts dt{font:600 8.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-facts dd{margin:0;overflow-wrap:anywhere}\n.bk-fam{display:grid;grid-template-columns:24mm 1fr;gap:1mm 4mm;margin:1mm 0 0}\n.bk-fam b{font:600 8.5pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-fam div{overflow-wrap:anywhere}\n.pref{display:inline-block;margin-left:.3em;min-width:3.6em;font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;white-space:nowrap}\n.bk-ev{display:grid;grid-template-columns:13mm 1fr;gap:.6mm 3mm;margin:0}\n.bk-ev .y{font:600 9pt/1.5 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;text-align:right;font-variant-numeric:tabular-nums}\n.bk-ev .s{font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-p{margin:0 0 2.4mm;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left}\n.bk-srcrefs{font:9pt/1.45 'Schibsted Grotesk',system-ui,sans-serif;color:#3d3b36;margin:0}\n.bk-srcrefs span.k{display:inline-block;min-width:6mm;font-weight:600;color:#8a5a3c}\n.bk-toc{display:grid;grid-template-columns:1fr auto;gap:2.4mm 6mm;margin-top:4mm;font-size:12pt}\n.bk-toc .n{font:600 10pt 'Schibsted Grotesk',system-ui,sans-serif;font-variant-numeric:tabular-nums;text-align:right;color:#5a5750}\n.bk-toc .d{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;display:block;margin-top:.4mm}\n.bk-fig{margin:0;min-width:0}\n.bk-figs{display:flex;flex-wrap:nowrap;gap:5mm;margin:0 0 5mm;align-items:flex-start}\n.bk-figs .bk-fig{flex:0 1 auto}\n.bk-figs img{display:block;object-fit:fill;background:#f3f1ec}\n.bk-figs figcaption{font:8.4pt/1.3 'Schibsted Grotesk',system-ui,sans-serif;color:#3d3b36;margin-top:1.2mm;overflow-wrap:anywhere}\n.bk-figs figcaption b{font-weight:600}\n.bk-src{margin:0 0 6mm;break-inside:avoid}\n.bk-src .hd{display:flex;gap:3mm;align-items:baseline;margin-bottom:1.4mm}\n.bk-src .hd .k{font:600 12pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c}\n.bk-src .hd .t{font:600 11pt 'Newsreader',Georgia,serif}\n.bk-src .who{font:9pt/1.4 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750;margin:0 0 2mm}\n.bk-src .img{display:block;background:#f3f1ec;border:.3mm solid #e1ddd3;overflow:hidden;box-sizing:content-box;max-width:100%}\n.bk-src .img img{width:100%;height:100%;display:block;object-fit:contain}\n.bk-tbl{width:100%;border-collapse:collapse;font-size:10pt}\n.bk-tbl th{font:600 8pt 'Schibsted Grotesk',system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#77746c;text-align:left;padding:0 2mm 1.4mm 0;border-bottom:.3mm solid #cfcabc}\n.bk-tbl td{padding:1.1mm 2mm 1.1mm 0;border-bottom:.2mm solid #ece9e1;vertical-align:top}\n.bk-tbl td.n{width:11mm;font:600 9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;font-variant-numeric:tabular-nums}\n.bk-tbl td.s{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#5a5750}\n.bk-gen{font:600 9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;margin:3mm 0 1.6mm}\n.bk-desc{margin:0;font-size:10pt;line-height:1.38}\n.bk-desc div{padding-left:calc(var(--d,0)*5mm);text-indent:-3mm;margin-left:3mm;overflow-wrap:anywhere}\n.bk-desc small{font:8.5pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c}\n.bk-reg{columns:2;column-gap:8mm;font-size:10pt;line-height:1.35;margin:0}\n.bk-reg div{break-inside:avoid;display:flex;justify-content:space-between;gap:3mm;padding:.35mm 0;border-bottom:.2mm dotted #d9d5cb}\n.bk-reg .p{font:9pt 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;white-space:nowrap}\n.bk-svg{display:block;width:174mm;margin:0}\n.bk-note{font:8.8pt/1.4 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin:2mm 0 0}\n\n.bk-ages{display:flex;flex-wrap:wrap;gap:3mm;margin:3mm 0 0}\n.bk-ages figure{margin:0;width:21mm;text-align:center;break-inside:avoid}\n.bk-ages figcaption{font:500 7.5pt/1.3 'Schibsted Grotesk',system-ui,sans-serif;color:#77746c;margin-top:1mm}\n.bk-ages .av{border:.3mm solid #d9d5cb;box-shadow:none}\n.bk-ph.half2{margin-top:12mm}\n\n.bk-fn{font:600 7pt/1 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c;margin-left:.6mm;vertical-align:super}\n.bk-dc{font-size:10pt;line-height:1.45;display:grid;gap:1.2mm}\n.bk-dc>div{display:grid;grid-template-columns:9mm minmax(0,1fr);break-inside:avoid}\n.bk-dc .n{font:600 8.5pt/1.6 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c}\n.bk-dc .p{color:#77746c}\n\n.bk-srch{margin:8mm 0 1mm}\n.bk-paper{font-size:9pt;margin:5mm 0 2mm}\n";
 const MMPX = 96 / 25.4;
 const BOOK_DEF = {
   title: 'Slekten', subtitle: '', cover: true, toc: true, tree: true, map: true,
   anc: false, ancRoot: '', desc: false, descRoot: '',
   persons: true, portrait: true, facts: true, family: true, life: true, notes: true, srcRefs: true, pagePerPerson: false,
-  photos: true, sources: true, srcImages: true, srcSize: 'mid', register: true, sort: 'name', selMode: 'all', bioRoot: '', halfPage: false
+  photos: true, sources: true, srcImages: true, srcSize: 'mid', causes: true, register: true, sort: 'name', selMode: 'all', bioRoot: '', halfPage: false
 };
 const escHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const sortPersons = (arr, how) => arr.sort(how === 'birth' ? ((a, b) => (a.birthYear == null) - (b.birthYear == null) || a.birthYear - b.birthYear || nameCmp(a, b)) : nameCmp);
@@ -4063,6 +4104,8 @@ async function waitFonts(){
 async function composeBook(o, inc){
   await waitFonts();
   const persons = sortPersons([...inc].map(id => Store.persons.get(id)).filter(Boolean), o.sort);
+  const causeOf = p => { const dc = deathCatOf(p), ds = deathSpecOf(p); return dc && ds ? dc + ' (' + ds + ')' : (dc || ds || ''); };
+  const dNo = new Map(); persons.forEach(p => { if (causeOf(p)) dNo.set(p.id, dNo.size + 1); });
   const blocks = [], toc = [], ranges = [];
   const B = (el, extra) => { blocks.push(Object.assign({ el }, extra || {})); return el; };
   const pref = id => inc.has(id) && o.persons ? h('span', { class: 'pref', 'data-pid': id }, ' (s. 00)') : null;
@@ -4143,12 +4186,13 @@ async function composeBook(o, inc){
         const b = [dateFull(p, 'birth'), placeName(p.birthPlace)].filter(Boolean).join(' · ');
         const d = [dateFull(p, 'death'), placeName(p.deathPlace)].filter(Boolean).join(' · ') || (isDead(p) ? 'tidspunkt ukjent' : '');
         if (p.middle) rows.push(['Mellomnavn', p.middle]);
+        if (godparentsOf(p).length) rows.push(['Faddere', godparentsOf(p).map(godparentName).join(', ')]);
+        if (p.baptYear != null) rows.push(['Døpt', [dateFull(p, 'bapt'), p.baptPlace && p.baptPlace.name ? noPlace(p.baptPlace.name) : ''].filter(Boolean).join(', ')]);
         if (p.patronym) rows.push(['Patronym', p.patronym]);
         if (b) rows.push(['Født', b]);
         if (p.emigratedTo) rows.push(['Utvandret til', [p.emigratedYear != null ? String(p.emigratedYear) : null, placeName(p.emigratedTo)].filter(Boolean).join(' · ')]);
-        if (d) rows.push(['Død', d]);
+        { const fn = o.causes && dNo.has(p.id) ? h('sup', { class: 'bk-fn' }, String(dNo.get(p.id))) : null; if (d || fn) rows.push(['Død', [d || 'Tidspunkt ukjent', fn]]); }
         if (p.burialPlace && p.burialPlace.name) rows.push(['Gravsted', placeName(p.burialPlace) + (p.burialNote ? ' (' + p.burialNote + ')' : '')]);
-        { const dc = deathCatOf(p), ds = deathSpecOf(p); if (dc || ds) rows.push(['Dødsårsak', dc && ds ? dc + ' (' + ds + ')' : (dc || ds)]); }
         if (rows.length) B(h('dl', { class: 'bk-facts' }, rows.map(([k, v]) => [h('dt', null, k), h('dd', null, v)])));
       }
       { const ag = AGE_SLOTS.map(([k, label]) => ({ label, sp: slotPortrait(p, k) })).filter(x => x.sp);
@@ -4219,10 +4263,9 @@ async function composeBook(o, inc){
   }
   // kilder
   if (o.sources && srcs.length){
-    section('sec-src', 'Kilder', plural(srcs.length, 'kilde', 'kilder'));
-    srcs.forEach(s => {
+    const renderSrc = s => {
       const who = tagged(s).map(t => Store.persons.get(t.pid)).filter(Boolean).map(fullName).join(', ');
-      const kids = [h('div', { class: 'hd' }, h('span', { class: 'k' }, kNo.get(s.id)), h('span', { class: 't' }, [s.srcType || 'Kilde', s.year].filter(Boolean).join(' · '))),
+      const kids = [h('div', { class: 'hd' }, h('span', { class: 'k' }, kNo.get(s.id)), h('span', { class: 't' }, [s.srcType || 'Kilde', s.srcType === 'Dødsannonse' ? s.paper : null, s.year].filter(Boolean).join(' · '))),
         s.ref ? h('p', { class: 'bk-p', style: { margin: '0 0 1mm' } }, s.ref) : null,
         s.caption ? h('p', { class: 'bk-p', style: { margin: '0 0 1mm' } }, s.caption) : null,
         h('p', { class: 'who' }, 'Nevner: ' + who)];
@@ -4232,7 +4275,29 @@ async function composeBook(o, inc){
       if (o.srcImages) kids.push(pageImg(pgs[0]));
       B(h('div', { class: 'bk-src' }, kids), { id: 's' + s.id });
       if (o.srcImages) pgs.slice(1).forEach((pgx, i) => B(h('div', { class: 'bk-src' }, h('div', { class: 'hd' }, h('span', { class: 'k' }, kNo.get(s.id)), h('span', { class: 't' }, 'side ' + (i + 2) + ' av ' + pgs.length)), pageImg(pgx))));
-    });
+    };
+    const obits = srcs.filter(s => s.srcType === 'Dødsannonse'), census = srcs.filter(s => s.srcType === 'Folketelling'), clips = srcs.filter(s => s.srcType === 'Avisutklipp'), other = srcs.filter(s => !['Dødsannonse', 'Folketelling', 'Avisutklipp'].includes(s.srcType));
+    if (other.length || clips.length){ section('sec-src', 'Kilder', plural(other.length + clips.length, 'kilde', 'kilder')); other.forEach(renderSrc); }
+    if (clips.length){
+      // avisutklipp samlet, med underoverskrift per avis og de eldste først
+      B(h('h2', { class: 'bk-h2 bk-srch' }, 'Avisutklipp'), { keep: true });
+      const byPaper = new Map(); clips.forEach(s => { const k = (s.paper || '').trim(); if (!byPaper.has(k)) byPaper.set(k, []); byPaper.get(k).push(s); });
+      [...byPaper.keys()].sort((a, c) => (a === '') - (c === '') || a.localeCompare(c, 'nb')).forEach(k => {
+        B(h('div', { class: 'bk-sec bk-paper' }, k || 'Ukjent avis'), { keep: true });
+        byPaper.get(k).sort((a, c) => (a.year == null) - (c.year == null) || (a.year || 0) - (c.year || 0) || (a.created || 0) - (c.created || 0)).forEach(renderSrc);
+      });
+    }
+    if (obits.length){ section('sec-obit', 'Dødsannonser', plural(obits.length, 'annonse', 'annonser')); obits.forEach(renderSrc); }
+    if (census.length){ section('sec-census', 'Folketellinger', plural(census.length, 'folketelling', 'folketellinger')); census.forEach(renderSrc); }
+  }
+  // dødsårsaker
+  if (o.causes && o.persons && dNo.size){
+    section('sec-dc', 'Dødsårsaker', plural(dNo.size, 'person', 'personer'));
+    const list = persons.filter(p => dNo.has(p.id));
+    for (let i = 0; i < list.length; i += 30){
+      B(h('div', { class: 'bk-dc' }, list.slice(i, i + 30).map(p => h('div', null, h('span', { class: 'n' }, String(dNo.get(p.id))),
+        h('span', null, h('b', null, fullName(p)), ' ', h('span', { class: 'p' }, lifeSpan(p)), ': ' + causeOf(p))))));
+    }
   }
   // register
   if (o.register){
@@ -4344,7 +4409,7 @@ const BookView = {
     try { const s = JSON.parse(localStorage.getItem('slekt.book') || 'null'); if (s){ Object.assign(this.o, s.o || {}); this.sel = new Set(s.sel || []); } } catch (_) {}
   },
   save(){ try { localStorage.setItem('slekt.book', JSON.stringify({ o: this.o, sel: [...this.sel] })); } catch (_) {} },
-  included(){ if (this.o.selMode === 'all') return new Set(Store.persons.keys()); if (this.o.selMode === 'bio'){ return Store.persons.has(this.o.bioRoot) ? bioRelatives(this.o.bioRoot) : new Set(); } return new Set([...this.sel].filter(id => Store.persons.has(id))); },
+  included(){ if (this.o.selMode === 'all') return new Set(Store.persons.keys()); if (this.o.selMode === 'bio'){ return Store.persons.has(this.o.bioRoot) ? bioRelatives(this.o.bioRoot) : new Set(); } if (['anc', 'desc', 'line'].includes(this.o.selMode)) return Store.persons.has(this.o.bioRoot) ? treeSet(this.o.selMode, this.o.bioRoot) : new Set(); return new Set([...this.sel].filter(id => Store.persons.has(id))); },
   mount(root){
     this.load(); this.root = root; this.result = null;
     this.ui = h('div', { class: 'bookui' });
@@ -4365,7 +4430,7 @@ const BookView = {
   },
   rootSel(key){
     const o = this.o;
-    const sel = h('select', { class: 'inp', 'aria-label': 'Utgangsperson', onchange: e => { o[key] = e.target.value; this.save(); } });
+    const sel = h('select', { class: 'inp', 'aria-label': 'Utgangsperson', onchange: e => { o[key] = e.target.value; this.save(); if (key === 'bioRoot') this.draw(); } });
     sel._key = key; this.rootSels = (this.rootSels || []).concat(sel);
     return sel;
   },
@@ -4385,21 +4450,23 @@ const BookView = {
     const descRow = o.desc ? h('div', { class: 'bk-sub' }, h('label', { class: 'lbl' }, 'Etterkommere av'), this.rootSel('descRoot')) : null;
     const personOpts = o.persons ? h('div', { class: 'bk-sub bk-grid' }, this.chk('portrait', 'Portrett'), this.chk('facts', 'Født og død'), this.chk('family', 'Familie'), this.chk('life', 'Livsløp og bosteder'), this.chk('notes', 'Notater'), this.chk('srcRefs', 'Kildehenvisninger'), this.chk('pagePerPerson', 'Hver person på ny side'), o.pagePerPerson ? this.chk('halfPage', 'Halv side ved lite informasjon', 'to personer med lite stoff deler en side') : null) : null;
     const srcOpts = o.sources ? h('div', { class: 'bk-sub' }, this.chk('srcImages', 'Ta med bildene av kildene'), o.srcImages ? h('div', { style: { marginTop: '8px' } }, h('label', { class: 'lbl' }, 'Størrelse på kildebilder'), h('select', { class: 'inp', style: { width: 'auto', maxWidth: '100%' }, 'aria-label': 'Størrelse på kildebilder', onchange: e => { o.srcSize = e.target.value; this.save(); } }, [['small', 'Liten (tre til fire kilder per side)'], ['mid', 'Middels (to kilder per side)'], ['big', 'Stor (opptil hel side)']].map(([v, t]) => h('option', { value: v, selected: (o.srcSize || 'mid') === v }, t)))) : null) : null;
-    if (o.selMode === 'bio' && !Store.persons.has(o.bioRoot)){ const ps0 = [...Store.persons.values()].sort(nameCmp); if (ps0.length) o.bioRoot = ps0[0].id; }
+    if (['bio', 'anc', 'desc', 'line'].includes(o.selMode) && !Store.persons.has(o.bioRoot)){ const ps0 = [...Store.persons.values()].sort(nameCmp); if (ps0.length) o.bioRoot = ps0[0].id; }
     const nSel = this.included().size;
     clear(this.ui).append(
       h('section', { class: 'card' }, h('h2', null, 'Innhold'),
         h('div', { class: 'bk-grid' }, this.chk('cover', 'Forside'), this.chk('toc', 'Innholdsfortegnelse'), this.chk('tree', 'Slektstre', 'tegning av de valgte personene'), this.chk('map', 'Kart over bosteder')),
         h('div', { class: 'bk-grid' }, this.chk('anc', 'Anetavle', 'forfedre i nummerert liste'), this.chk('desc', 'Etterkommere', 'inndelt oversikt')), ancRow, descRow,
         h('div', { class: 'bk-grid' }, this.chk('persons', 'Personkapitler', 'én fortelling per person')), personOpts,
-        h('div', { class: 'bk-grid' }, this.chk('photos', 'Fotografier', 'med navn på dem som er tagget'), this.chk('sources', 'Kilder', 'kirkebøker, bygdebøker og avisutklipp')), srcOpts,
-        h('div', { class: 'bk-grid' }, this.chk('register', 'Navneregister', 'med sidehenvisninger'))),
+        h('div', { class: 'bk-grid' }, this.chk('photos', 'Fotografier', 'med navn på dem som er tagget'), this.chk('sources', 'Kilder', 'dødsannonser og folketellinger får egne deler bakerst')), srcOpts,
+        h('div', { class: 'bk-grid' }, this.chk('causes', 'Dødsårsaker', 'register bakerst, fotnote ved dødsdatoen'), this.chk('register', 'Navneregister', 'med sidehenvisninger'))),
       h('section', { class: 'card' }, h('h2', null, 'Personer'),
-        h('div', { class: 'seg', role: 'group', 'aria-label': 'Hvilke personer' },
-          h('button', { type: 'button', 'aria-pressed': String(o.selMode === 'all'), onclick: () => { o.selMode = 'all'; this.save(); this.draw(); } }, 'Alle (' + Store.persons.size + ')'),
-          h('button', { type: 'button', 'aria-pressed': String(o.selMode === 'bio'), onclick: () => { o.selMode = 'bio'; this.save(); this.draw(); } }, 'Biologisk slekt' + (o.selMode === 'bio' ? ' (' + nSel + ')' : '')),
-          h('button', { type: 'button', 'aria-pressed': String(o.selMode === 'pick'), onclick: () => { o.selMode = 'pick'; if (!this.sel.size) this.sel = new Set(Store.persons.keys()); this.save(); this.draw(); } }, 'Utvalg' + (o.selMode === 'pick' ? ' (' + nSel + ')' : ''))),
-        o.selMode === 'bio' ? h('div', { class: 'bk-sub' }, h('label', { class: 'lbl' }, 'Alle biologiske slektninger av'), this.rootSel('bioRoot'), h('p', { class: 'faint', style: { fontSize: '13px', margin: '6px 0 0' } }, 'Forfedre og alle deres etterkommere: søsken, onkler, tanter, søskenbarn og så videre. Steforeldre og partnere til slektningene er ikke med.')) : null,
+        (() => {
+          const modes = [['anc', 'Aner (oppover)', 'Forfedrene til personen, og personens partnere.'], ['desc', 'Etterkommere (nedover)', 'Barn, barnebarn og videre nedover, med partnerne deres.'], ['line', 'Aner og etterkommere', 'Både forfedre og etterkommere, med partnere.'],
+            ['bio', 'Alle biologiske slektninger', 'Forfedre og alle deres etterkommere: søsken, onkler, tanter, søskenbarn og så videre. Steforeldre og partnere til slektningene er ikke med.'], ['all', 'Alle i registeret', ''], ['pick', 'Eget utvalg', '']];
+          const cur = modes.find(m => m[0] === o.selMode) || modes[4], rooted = ['anc', 'desc', 'line', 'bio'].includes(o.selMode);
+          return [h('div', { class: 'seg bk-modes', role: 'group', 'aria-label': 'Hvilke personer' }, modes.map(([k, t]) => h('button', { type: 'button', 'data-mode': k, 'aria-pressed': String(o.selMode === k), onclick: () => { o.selMode = k; if (k === 'pick' && !this.sel.size) this.sel = new Set(Store.persons.keys()); this.save(); this.draw(); } }, t + (o.selMode === k ? ' (' + nSel + ')' : '')))),
+            rooted ? h('div', { class: 'bk-sub' }, h('label', { class: 'lbl' }, 'Med utgangspunkt i'), this.rootSel('bioRoot'), cur[2] ? h('p', { class: 'faint', style: { fontSize: '13px', margin: '6px 0 0' } }, cur[2]) : null) : null];
+        })(),
         o.selMode === 'pick' ? this.pickUi() : null),
       h('section', { class: 'card' }, h('h2', null, 'Tittel og rekkefølge'),
         h('div', { class: 'fgrid' },
@@ -4431,7 +4498,7 @@ const BookView = {
           h('button', { class: 'btn sm ghost', onclick: () => { this.sel = new Set(); this.save(); this.drawList(); this.countLabel(); } }, 'Fjern alle'))),
       this.search, this.listEl);
   },
-  countLabel(){ const b = this.ui.querySelectorAll('.seg button')[1]; if (b) b.textContent = 'Utvalg (' + this.included().size + ')'; },
+  countLabel(){ const b = this.ui.querySelector('.bk-modes button[data-mode=pick]'); if (b) b.textContent = 'Eget utvalg (' + this.included().size + ')'; },
   drawList(){
     if (!this.listEl) return;
     const q = norm(this.search ? this.search.value : '');
@@ -4500,7 +4567,7 @@ const App = {
   tabOf: { register: 'register', person: 'register', ancestors: 'register', descendants: 'register', stats: 'stats', kinship: 'register', places: 'register', place: 'register', quality: 'register', timeline: 'register', compare: 'register', tree: 'tree', map: 'map', photos: 'photos', book: 'book' },
   hashOf: { register: 'register', tree: 'tre', map: 'kart', photos: 'bilder' },
   init(){
-    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '12.11 13:12')); } catch (_) {}
+    try { const br = document.querySelector('.brand'); if (br) br.appendChild(h('small', { title: 'Versjon av appen' }, 'v' + '12.11 16:27')); } catch (_) {}
     this.main = document.getElementById('main');
     this.banner = document.getElementById('banner');
     const tabs = document.getElementById('tabs');
