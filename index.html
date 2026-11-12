@@ -736,6 +736,25 @@ button.ds-t:hover{background:var(--surface-2)}
 .page .fan text.fr,.page .fan text.fy{fill:#5a5750}
 .page .fan-c path,.page .fan-c circle{fill:#efe4d8;stroke:#8d897f;stroke-width:1.1}
 
+/* liten rund anetavle øverst til høyre i personkapitlet */
+.bk-ph{clear:both}
+.bk-h1{clear:both}
+.bk-ph.hasfan{display:block}
+.bk-ph.hasfan .bk-phi{display:flex;gap:5mm;align-items:center}
+.bk-fanm{float:right;width:78mm;margin:0 0 3mm 5mm}
+.bk-fanm svg{display:block;width:78mm;height:78mm}
+.fanm .w path{fill:#fff;stroke:#8d897f;stroke-width:.14}
+.fanm .w.r0 path{fill:#f4f1ea}
+.fanm .w.e path{fill:none;stroke:#cfcabf;stroke-width:.1;stroke-dasharray:.5 .6}
+.fanm text{fill:#22211e;font-family:'Schibsted Grotesk',system-ui,sans-serif}
+.fanm text.n{font-weight:700}
+.fanm text.f,.fanm text.y{fill:#5a5750}
+.fanm .c circle{fill:#efe4d8;stroke:#8d897f;stroke-width:.14}
+/* etterkommere: loddrette striper der hver generasjon begynner */
+.bk-desc div{padding-left:calc(var(--d,0)*6mm + 5mm);text-indent:0;margin-left:0;position:relative;padding-block:.35mm;
+  background-image:repeating-linear-gradient(to right,#b9b3a6 0,#b9b3a6 .3mm,transparent .3mm,transparent 6mm);background-size:calc(var(--d,0)*6mm + .3mm) 100%;background-repeat:no-repeat}
+.bk-desc .gn{position:absolute;left:calc(var(--d,0)*6mm + .9mm);font:600 7.5pt/1.9 'Schibsted Grotesk',system-ui,sans-serif;color:#8a5a3c}
+
 </style>
 </head>
 <body>
@@ -752,9 +771,9 @@ button.ds-t:hover{background:var(--surface-2)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
-<script src="data-world.js?v=202611121836"></script>
-<script src="data-kom.js?v=202611121836"></script>
-<script src="data-gaz.js?v=202611121836"></script>
-<script src="app.js?v=202611121836"></script>
+<script src="data-world.js?v=202611121938"></script>
+<script src="data-kom.js?v=202611121938"></script>
+<script src="data-gaz.js?v=202611121938"></script>
+<script src="app.js?v=202611121938"></script>
 </body>
 </html>
